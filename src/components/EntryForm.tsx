@@ -3,14 +3,16 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Transaction } from '@/types';
-import { Loader2, Save, Trash2, PlusCircle, ChevronRight, Search } from 'lucide-react';
+// ▼ 1. アイコンを追加 (Store, Gamepad2)
+import { Loader2, Trash2, ChevronRight, Store, Gamepad2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-// ★追加
 import { MasterListSelector } from './MasterListSelector';
+// ▼ 2. 新しいボタンコンポーネントをインポート
+import { SelectionButton } from '@/components/SelectionButton';
 
 type Props = {
   isOpen: boolean;
@@ -31,7 +33,6 @@ export const EntryForm = ({ isOpen, onClose, onSuccess, householdId, initialData
   const [recovery, setRecovery] = useState('');
   const [memo, setMemo] = useState('');
 
-  // ★追加: セレクター用ステート
   const [selectorOpen, setSelectorOpen] = useState(false);
   const [selectorCategory, setSelectorCategory] = useState<'shop' | 'machine'>('shop');
 
@@ -117,7 +118,6 @@ export const EntryForm = ({ isOpen, onClose, onSuccess, householdId, initialData
 
   const currentBalance = (parseInt(recovery || '0') - parseInt(investment || '0'));
 
-  // ★セレクターを開く関数
   const openSelector = (cat: 'shop' | 'machine') => {
     setSelectorCategory(cat);
     setSelectorOpen(true);
@@ -138,37 +138,26 @@ export const EntryForm = ({ isOpen, onClose, onSuccess, householdId, initialData
               <Input type="date" value={date} onChange={e => setDate(e.target.value)} required />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label>店舗</Label>
-                {/* ★変更: ボタン化 */}
-                <Button 
-                  type="button" 
-                  variant="outline" 
-                  className={`w-full justify-between font-normal ${!shopName && 'text-slate-400'}`}
-                  onClick={() => openSelector('shop')}
-                >
-                  <span className="truncate">{shopName || '店舗を選択'}</span>
-                  <ChevronRight className="w-4 h-4 opacity-50" />
-                </Button>
-              </div>
-              <div className="grid gap-2">
-                <Label>機種</Label>
-                {/* ★変更: ボタン化 */}
-                <Button 
-                  type="button" 
-                  variant="outline" 
-                  className={`w-full justify-between font-normal ${!machineName && 'text-slate-400'}`}
-                  onClick={() => openSelector('machine')}
-                >
-                   <span className="truncate">{machineName || '機種を選択'}</span>
-                   <ChevronRight className="w-4 h-4 opacity-50" />
-                </Button>
-              </div>
+            {/* ▼ 3. レイアウト変更: grid-cols-2 を削除し、space-y-3 で縦並びに */}
+            <div className="space-y-3">
+              <SelectionButton
+                label="SHOP"
+                placeholder="店舗を選択"
+                value={shopName}
+                icon={<Store className="w-6 h-6" />}
+                onClick={() => openSelector('shop')}
+              />
+              <SelectionButton
+                label="MACHINE"
+                placeholder="機種を選択"
+                value={machineName}
+                icon={<Gamepad2 className="w-6 h-6" />}
+                onClick={() => openSelector('machine')}
+              />
             </div>
 
             <div className="grid grid-cols-2 gap-4 p-4 bg-slate-50 rounded-lg">
-              {/* 投資 (変更なし) */}
+              {/* 投資 */}
               <div className="grid gap-2">
                 <Label className="text-red-500 font-bold">投資 (IN)</Label>
                 <Input 
@@ -185,7 +174,7 @@ export const EntryForm = ({ isOpen, onClose, onSuccess, householdId, initialData
                 </div>
               </div>
 
-              {/* 回収 (変更なし) */}
+              {/* 回収 */}
               <div className="grid gap-2">
                 <Label className="text-blue-500 font-bold">回収 (OUT)</Label>
                 <Input 
@@ -231,7 +220,6 @@ export const EntryForm = ({ isOpen, onClose, onSuccess, householdId, initialData
         </DialogContent>
       </Dialog>
 
-      {/* ★リスト選択用モーダル */}
       <MasterListSelector 
         isOpen={selectorOpen}
         onClose={() => setSelectorOpen(false)}
