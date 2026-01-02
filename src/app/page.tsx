@@ -18,8 +18,8 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { 
   LogOut, Users, Wallet, Settings, Trash2,
-  List, Calendar as CalendarIcon, NotebookPen, PieChart, History,
-  ChevronLeft, ChevronRight, ArrowUpDown, Filter, Save, Lock, UserCircle
+  Calendar as CalendarIcon, NotebookPen, PieChart, History,
+  ChevronLeft, ChevronRight, ArrowUpDown, Filter, Save, Lock, UserCircle, ArrowLeft
 } from 'lucide-react';
 import { format, addMonths, subMonths, startOfMonth, endOfMonth, isWithinInterval, parseISO } from 'date-fns';
 import { ja } from 'date-fns/locale';
@@ -56,7 +56,8 @@ export default function Home() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   
-  const [viewMode, setViewMode] = useState<'list' | 'calendar' | 'analysis' | 'history'>('list');
+  // ★変更: 初期値をcalendarに
+  const [viewMode, setViewMode] = useState<'calendar' | 'list' | 'analysis' | 'history'>('calendar');
   const [displayMonth, setDisplayMonth] = useState(new Date());
   const [sortOrder, setSortOrder] = useState<'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc'>('date-desc');
 
@@ -100,18 +101,13 @@ export default function Home() {
         .eq('id', user.id)
         .single();
 
-      if (error && status !== 406) {
-        throw error;
-      }
-
+      if (error && status !== 406) throw error;
       if (data) {
         setProfile(data);
         setEditUsername(data.username);
         setAvatarUrl(data.avatar_url);
       }
-    } catch (error) {
-      console.log('Error loading user data!');
-    }
+    } catch (error) { console.log('Error loading user data!'); }
   };
 
   const updateProfile = async () => {
@@ -128,13 +124,10 @@ export default function Home() {
 
       const { error } = await supabase.from('profiles').upsert(updates);
       if (error) throw error;
-      
       alert('プロフィールを更新しました！');
       getProfile();
       if (currentHousehold) fetchTransactions(); 
-    } catch (error) {
-      alert('更新に失敗しました');
-    }
+    } catch (error) { alert('更新に失敗しました'); }
   };
 
   const checkPendingInvite = async () => {
@@ -218,7 +211,6 @@ export default function Home() {
       .from('household_members')
       .select('user_id, role, profiles(username)')
       .eq('household_id', currentHousehold.id);
-
     if (data) {
       const mems = data as unknown as HouseholdMember[];
       setMembers(mems);
@@ -337,6 +329,7 @@ export default function Home() {
           </CardHeader>
           <CardContent>
             <form onSubmit={handleAuth} className="space-y-4">
+              {/* ... (ログインフォーム) ... */}
               {!isLoginMode && (
                 <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
                   <label className="text-sm font-medium">お名前 (ニックネーム)</label>
@@ -367,7 +360,7 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-24 safe-area-padding">
+    <div className="min-h-screen bg-slate-50 pb-32 safe-area-padding">
       <header className="bg-white/90 backdrop-blur-md border-b sticky top-0 z-10 px-4 py-3 flex justify-between items-center shadow-sm">
         <div className="flex items-center gap-2 flex-1 min-w-0 mr-2">
           <Wallet className="w-6 h-6 text-blue-600 shrink-0" />
@@ -414,34 +407,7 @@ export default function Home() {
 
         {currentHousehold && (
           <>
-            {viewMode !== 'history' && (
-              <>
-                <div className="bg-white p-2 rounded-xl shadow-sm border border-slate-100 flex items-center justify-between">
-                  <Button variant="ghost" size="icon" onClick={prevMonth} className="text-slate-400 hover:text-slate-600">
-                    <ChevronLeft className="w-6 h-6" />
-                  </Button>
-                  
-                  <div className="flex flex-col items-center">
-                    <span className="text-xs font-bold text-slate-400 mb-0.5 tracking-wider">
-                      {format(displayMonth, 'yyyy年 M月', { locale: ja })}
-                    </span>
-                    <div className={`text-2xl font-mono font-bold tracking-tight ${monthlyBalance >= 0 ? 'text-blue-600' : 'text-red-500'}`}>
-                      {monthlyBalance >= 0 ? '+' : ''}{monthlyBalance.toLocaleString()}
-                    </div>
-                  </div>
-
-                  <Button variant="ghost" size="icon" onClick={nextMonth} className="text-slate-400 hover:text-slate-600">
-                    <ChevronRight className="w-6 h-6" />
-                  </Button>
-                </div>
-
-                <div className="w-full h-14 bg-slate-100 rounded-lg border border-dashed border-slate-200 flex items-center justify-center text-xs text-slate-400 overflow-hidden relative">
-                    <span className="z-10 font-medium">広告スペース</span>
-                    <div className="absolute inset-0 opacity-5 bg-[radial-gradient(#cbd5e1_1px,transparent_1px)] [background-size:8px_8px]"></div>
-                </div>
-              </>
-            )}
-
+            {/* メンバーフィルタ */}
             {members.length > 1 && (
               <div className="bg-white p-2 rounded-lg shadow-sm border border-slate-100 overflow-x-auto">
                 <div className="flex items-center gap-2 text-xs font-bold text-slate-500 mb-1 px-1">
@@ -468,28 +434,40 @@ export default function Home() {
               </div>
             )}
 
-            <div className="bg-slate-200 p-1 rounded-lg flex mb-4 overflow-x-auto">
-              {[
-                { id: 'list', label: 'リスト', icon: List },
-                { id: 'calendar', label: '暦', icon: CalendarIcon },
-                { id: 'analysis', label: '分析', icon: PieChart },
-                { id: 'history', label: '履歴', icon: History },
-              ].map(tab => (
-                <button
-                  key={tab.id}
-                  onClick={() => setViewMode(tab.id as any)}
-                  className={`flex-1 flex flex-col sm:flex-row items-center justify-center py-2 px-1 text-[10px] sm:text-xs font-bold rounded-md transition-all ${
-                    viewMode === tab.id ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'
-                  }`}
-                >
-                  <tab.icon className="w-4 h-4 mb-1 sm:mb-0 sm:mr-1" />
-                  <span>{tab.label}</span>
-                </button>
-              ))}
-            </div>
+            {/* コンテンツエリア */}
+            {viewMode === 'calendar' ? (
+              <div className="space-y-4">
+                {/* ★変更: カレンダーと一体化したヘッダー */}
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                  <div className="bg-slate-50/50 border-b border-slate-100 p-4 flex flex-col items-center">
+                    <div className="flex items-center justify-between w-full px-4 mb-2">
+                       <Button variant="ghost" size="icon" onClick={prevMonth} className="h-8 w-8 text-slate-400">
+                        <ChevronLeft className="w-5 h-5" />
+                       </Button>
+                       <span className="font-bold text-slate-600 text-lg">
+                         {format(displayMonth, 'yyyy年 M月', { locale: ja })}
+                       </span>
+                       <Button variant="ghost" size="icon" onClick={nextMonth} className="h-8 w-8 text-slate-400">
+                        <ChevronRight className="w-5 h-5" />
+                       </Button>
+                    </div>
+                    <div className={`text-3xl font-mono font-bold tracking-tight ${monthlyBalance >= 0 ? 'text-blue-600' : 'text-red-500'}`}>
+                      {monthlyBalance >= 0 ? '+' : ''}{monthlyBalance.toLocaleString()}
+                    </div>
+                  </div>
+                  <CalendarView transactions={filteredTransactions} onSelectTransaction={openEditForm} />
+                </div>
+              </div>
+            ) : viewMode === 'list' ? (
+              <div className="space-y-4">
+                {/* リスト表示時のヘッダー（戻るボタン） */}
+                <div className="flex items-center gap-2 mb-2">
+                  <Button variant="outline" size="sm" onClick={() => setViewMode('history')} className="gap-1">
+                    <ArrowLeft className="w-4 h-4" /> 履歴へ戻る
+                  </Button>
+                  <span className="text-sm font-bold text-slate-500">日別詳細リスト</span>
+                </div>
 
-            {viewMode === 'list' ? (
-              <div className="pb-4">
                 <div className="flex justify-end mb-2">
                   <div className="relative">
                     <ArrowUpDown className="absolute left-2 top-2.5 h-4 w-4 text-slate-500" />
@@ -517,17 +495,54 @@ export default function Home() {
                   ))
                 )}
               </div>
-            ) : viewMode === 'calendar' ? (
-              <CalendarView transactions={filteredTransactions} onSelectTransaction={openEditForm} />
             ) : viewMode === 'analysis' ? (
               <AnalysisView transactions={filteredTransactions} />
             ) : (
-              <HistoryView transactions={filteredTransactions} />
+              // 履歴ビュー (日別タブ切り替え用関数を渡す)
+              <HistoryView 
+                transactions={filteredTransactions} 
+                onSwitchToDaily={() => setViewMode('list')}
+              />
             )}
+
+            {/* ★広告スペース (コンテンツの下、タブバーの上) */}
+            <div className="mt-6 mb-2">
+              <div className="w-full h-16 bg-slate-100 rounded-lg border border-dashed border-slate-200 flex items-center justify-center text-xs text-slate-400 overflow-hidden relative mx-auto max-w-sm">
+                  <span className="z-10 font-medium">広告スペース</span>
+                  <div className="absolute inset-0 opacity-5 bg-[radial-gradient(#cbd5e1_1px,transparent_1px)] [background-size:8px_8px]"></div>
+              </div>
+            </div>
+
+            {/* タブナビゲーション (リストを削除し3つに) */}
+            <div className="fixed bottom-4 left-4 right-4 max-w-md mx-auto z-50">
+               <div className="bg-white/90 backdrop-blur-md p-1.5 rounded-2xl shadow-xl border border-slate-200/60 flex justify-around items-center">
+                {[
+                  { id: 'calendar', label: 'カレンダー', icon: CalendarIcon },
+                  { id: 'analysis', label: '分析', icon: PieChart },
+                  { id: 'history', label: '履歴', icon: History },
+                ].map(tab => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setViewMode(tab.id as any)}
+                    className={`
+                      flex flex-col items-center justify-center w-full py-2 rounded-xl transition-all duration-200
+                      ${viewMode === tab.id 
+                        ? 'text-blue-600 bg-blue-50 scale-105 font-bold shadow-sm' 
+                        : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'
+                      }
+                    `}
+                  >
+                    <tab.icon className={`w-5 h-5 mb-1 ${viewMode === tab.id ? 'stroke-[2.5px]' : 'stroke-2'}`} />
+                    <span className="text-[10px]">{tab.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
           </>
         )}
       </main>
 
+      {/* 設定モーダル等は変更なし */}
       <Dialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen}>
         <DialogContent className="max-w-[90%] rounded-xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -535,29 +550,19 @@ export default function Home() {
           </DialogHeader>
           
           <div className="space-y-6 py-4">
-            
             <div className="space-y-4 border p-4 rounded-lg bg-blue-50/50">
               <Label className="flex items-center gap-2 text-base text-blue-800">
                 <UserCircle className="w-5 h-5" /> アカウント設定
               </Label>
-              
               <AvatarUpload 
                 url={avatarUrl} 
                 onUpload={(url) => { setAvatarUrl(url); }}
               />
-
               <div className="space-y-2">
                 <Label>ユーザー名</Label>
                 <div className="flex gap-2">
-                  <Input 
-                    value={editUsername} 
-                    onChange={e => setEditUsername(e.target.value)} 
-                    placeholder="ユーザー名を入力"
-                    className="bg-white"
-                  />
-                  <Button onClick={updateProfile}>
-                    <Save className="w-4 h-4" />
-                  </Button>
+                  <Input value={editUsername} onChange={e => setEditUsername(e.target.value)} placeholder="ユーザー名を入力" className="bg-white" />
+                  <Button onClick={updateProfile}><Save className="w-4 h-4" /></Button>
                 </div>
               </div>
             </div>
@@ -583,7 +588,6 @@ export default function Home() {
                   <p className="text-xs text-red-500">※ オーナーにより編集が制限されています</p>
                 )}
               </div>
-
               {isOwner && (
                 <div className="flex items-center justify-between border-t pt-4">
                   <div className="space-y-0.5">
@@ -592,20 +596,11 @@ export default function Home() {
                     </Label>
                     <p className="text-xs text-slate-500">メンバーによるグループ名の変更を禁止</p>
                   </div>
-                  <Switch
-                    checked={isEditRestricted}
-                    onCheckedChange={setIsEditRestricted}
-                  />
+                  <Switch checked={isEditRestricted} onCheckedChange={setIsEditRestricted} />
                 </div>
               )}
-
               <div className="pt-2 text-center">
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  className="h-8 text-xs text-slate-500 hover:text-blue-600"
-                  onClick={copyInviteLink}
-                >
+                <Button variant="ghost" size="sm" className="h-8 text-xs text-slate-500 hover:text-blue-600" onClick={copyInviteLink}>
                   <Users className="w-3 h-3 mr-1" /> 招待リンクをコピー
                 </Button>
               </div>
