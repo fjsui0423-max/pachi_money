@@ -1,0 +1,26 @@
+export type Profile = {
+  id: string;
+  username: string;
+  avatar_url?: string;
+};
+
+export type Household = {
+  id: string;
+  name: string;
+  owner_id: string;
+  invite_token: string;
+};
+
+export type Transaction = {
+  id: number;
+  created_at: string;
+  date: string;
+  shop_name: string;
+  machine_name: string;
+  investment: number;
+  recovery: number;
+  amount: number;
+  type: 'income' | 'expense';
+  memo?: string;
+  user_id: string; // 誰の記録か
+};
