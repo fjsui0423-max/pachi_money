@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Plus, History, Check, Search } from 'lucide-react';
+import { Plus, Search, Check, Pencil, Trash2, X, Save, Loader2 } from 'lucide-react'; // アイコン追加
 
 type Props = {
   isOpen: boolean;
@@ -21,20 +21,23 @@ type Props = {
 export const MasterListSelector = ({ isOpen, onClose, onSelect, category, householdId, currentValue }: Props) => {
   const [items, setItems] = useState<MasterItem[]>([]);
   const [historyItems, setHistoryItems] = useState<string[]>([]);
-  const [newItemName, setNewItemName] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [tab, setTab] = useState<'list' | 'history'>('list');
+  
+  // ★編集用ステート
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editName, setEditName] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     if (isOpen && householdId) {
       fetchMasterItems();
       fetchHistory();
-      setNewItemName('');
       setSearchQuery('');
+      setEditingId(null);
     }
   }, [isOpen, householdId, category]);
 
-  // マスターリスト取得
   const fetchMasterItems = async () => {
     const { data } = await supabase
       .from('master_items')
@@ -45,7 +48,6 @@ export const MasterListSelector = ({ isOpen, onClose, onSelect, category, househ
     if (data) setItems(data as MasterItem[]);
   };
 
-  // 履歴取得 (transactionsテーブルから、マスターにないものも含めて直近のものを探す)
   const fetchHistory = async () => {
     const column = category === 'shop' ? 'shop_name' : 'machine_name';
     const { data } = await supabase
@@ -56,7 +58,6 @@ export const MasterListSelector = ({ isOpen, onClose, onSelect, category, househ
       .limit(50);
 
     if (data) {
-      // 重複排除してリスト化
       const list = Array.from(new Set(data.map((d: any) => d[column]).filter(Boolean))) as string[];
       setHistoryItems(list);
     }
@@ -64,24 +65,69 @@ export const MasterListSelector = ({ isOpen, onClose, onSelect, category, househ
 
   // 新規追加
   const handleAdd = async (nameToAdd: string) => {
-    if (!nameToAdd) return;
+    if (!nameToAdd || isSubmitting) return;
+    setIsSubmitting(true);
     
-    // 既にリストにあるか確認
     const exists = items.find(i => i.name === nameToAdd);
     if (!exists) {
-      const { error } = await supabase
-        .from('master_items')
-        .insert({
-          household_id: householdId,
-          category,
-          name: nameToAdd
-        });
-      if (!error) {
-        await fetchMasterItems(); // リスト更新
-      }
+      const { error } = await supabase.from('master_items').insert({
+        household_id: householdId,
+        category,
+        name: nameToAdd
+      });
+      if (!error) await fetchMasterItems();
     }
+    setIsSubmitting(false);
     onSelect(nameToAdd);
     onClose();
+  };
+
+  // ★削除機能
+  const handleDelete = async (e: React.MouseEvent, id: number, name: string) => {
+    e.stopPropagation(); // 行クリックイベントを止める
+    if (!confirm(`リストから「${name}」を削除しますか？\n(過去の記録は消えません)`)) return;
+    
+    setIsSubmitting(true);
+    const { error } = await supabase.from('master_items').delete().eq('id', id);
+    if (error) {
+      alert('削除に失敗しました');
+    } else {
+      await fetchMasterItems();
+    }
+    setIsSubmitting(false);
+  };
+
+  // ★編集モード開始
+  const startEdit = (e: React.MouseEvent, item: MasterItem) => {
+    e.stopPropagation();
+    setEditingId(item.id);
+    setEditName(item.name);
+  };
+
+  // ★編集保存
+  const saveEdit = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!editName || !editingId) return;
+    setIsSubmitting(true);
+
+    const { error } = await supabase
+      .from('master_items')
+      .update({ name: editName })
+      .eq('id', editingId);
+
+    if (error) {
+      alert('更新できませんでした');
+    } else {
+      await fetchMasterItems();
+      setEditingId(null);
+    }
+    setIsSubmitting(false);
+  };
+
+  // ★編集キャンセル
+  const cancelEdit = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingId(null);
   };
 
   const filteredItems = items.filter(i => i.name.toLowerCase().includes(searchQuery.toLowerCase()));
@@ -103,14 +149,14 @@ export const MasterListSelector = ({ isOpen, onClose, onSelect, category, househ
               className="pl-8"
             />
           </div>
-          {/* 検索結果がなく、入力がある場合は「新規追加」ボタンを表示 */}
           {searchQuery && !items.find(i => i.name === searchQuery) && (
             <Button 
               variant="outline" 
               className="w-full mt-2 justify-start text-blue-600 border-blue-200 bg-blue-50"
               onClick={() => handleAdd(searchQuery)}
+              disabled={isSubmitting}
             >
-              <Plus className="w-4 h-4 mr-2" /> 「{searchQuery}」をリストに追加して選択
+              <Plus className="w-4 h-4 mr-2" /> 「{searchQuery}」をリストに追加
             </Button>
           )}
         </div>
@@ -121,22 +167,67 @@ export const MasterListSelector = ({ isOpen, onClose, onSelect, category, househ
             <TabsTrigger value="history">履歴から</TabsTrigger>
           </TabsList>
 
+          {/* ★登録リストタブ */}
           <TabsContent value="list" className="flex-1 overflow-y-auto p-4 pt-2 space-y-1">
             {filteredItems.length === 0 && !searchQuery && (
               <p className="text-center text-sm text-slate-400 py-4">リストは空です</p>
             )}
             {filteredItems.map(item => (
-              <button
+              <div
                 key={item.id}
-                onClick={() => { onSelect(item.name); onClose(); }}
-                className="w-full text-left px-3 py-3 rounded-lg hover:bg-slate-100 flex justify-between items-center text-sm font-medium border-b border-slate-50 last:border-0"
+                className="w-full flex justify-between items-center text-sm font-medium border-b border-slate-50 last:border-0 rounded-lg hover:bg-slate-50 group"
               >
-                {item.name}
-                {currentValue === item.name && <Check className="w-4 h-4 text-blue-600" />}
-              </button>
+                {editingId === item.id ? (
+                  // 編集モード
+                  <div className="flex items-center gap-1 w-full p-1">
+                    <Input 
+                      value={editName} 
+                      onChange={e => setEditName(e.target.value)}
+                      className="h-8 text-sm"
+                      autoFocus
+                    />
+                    <Button size="icon" variant="ghost" className="h-8 w-8 text-green-600" onClick={saveEdit}>
+                      <Save className="w-4 h-4" />
+                    </Button>
+                    <Button size="icon" variant="ghost" className="h-8 w-8 text-slate-400" onClick={cancelEdit}>
+                      <X className="w-4 h-4" />
+                    </Button>
+                  </div>
+                ) : (
+                  // 通常モード
+                  <>
+                    <button
+                      onClick={() => { onSelect(item.name); onClose(); }}
+                      className="flex-1 text-left px-3 py-3 flex items-center justify-between"
+                    >
+                      <span className="truncate">{item.name}</span>
+                      {currentValue === item.name && <Check className="w-4 h-4 text-blue-600 shrink-0" />}
+                    </button>
+                    
+                    {/* 操作ボタン (ホバー時またはスマホでは常に表示領域確保) */}
+                    <div className="flex items-center px-2 gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                      <Button 
+                        size="icon" variant="ghost" 
+                        className="h-8 w-8 text-slate-400 hover:text-blue-600 hover:bg-blue-50"
+                        onClick={(e) => startEdit(e, item)}
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </Button>
+                      <Button 
+                        size="icon" variant="ghost" 
+                        className="h-8 w-8 text-slate-400 hover:text-red-600 hover:bg-red-50"
+                        onClick={(e) => handleDelete(e, item.id, item.name)}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                  </>
+                )}
+              </div>
             ))}
           </TabsContent>
 
+          {/* 履歴タブ */}
           <TabsContent value="history" className="flex-1 overflow-y-auto p-4 pt-2 space-y-1">
             <p className="text-xs text-slate-400 mb-2">過去の入力履歴 (リスト未登録含む)</p>
             {historyItems.map((name, idx) => {
@@ -155,8 +246,9 @@ export const MasterListSelector = ({ isOpen, onClose, onSelect, category, househ
                       className="h-8 px-2 text-blue-600"
                       onClick={() => handleAdd(name)}
                       title="リストに登録"
+                      disabled={isSubmitting}
                     >
-                      <Plus className="w-4 h-4" /> 登録
+                      {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />} 登録
                     </Button>
                   )}
                 </div>
