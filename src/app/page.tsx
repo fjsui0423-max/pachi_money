@@ -56,7 +56,6 @@ export default function Home() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   
-  // ★変更: 初期値をcalendarに
   const [viewMode, setViewMode] = useState<'calendar' | 'list' | 'analysis' | 'history'>('calendar');
   const [displayMonth, setDisplayMonth] = useState(new Date());
   const [sortOrder, setSortOrder] = useState<'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc'>('date-desc');
@@ -290,16 +289,23 @@ export default function Home() {
     return transactions.filter(t => selectedMemberIds.includes(t.user_id));
   }, [transactions, selectedMemberIds]);
 
-  const monthlyBalance = useMemo(() => {
+  // ★追加: リスト表示用に「表示中の月」でフィルタリング
+  const monthlyTransactions = useMemo(() => {
     const start = startOfMonth(displayMonth);
     const end = endOfMonth(displayMonth);
-    return filteredTransactions
-      .filter(t => t.date && isWithinInterval(parseISO(t.date), { start, end }))
-      .reduce((sum, t) => sum + t.amount, 0);
+    return filteredTransactions.filter(t => t.date && isWithinInterval(parseISO(t.date), { start, end }));
   }, [filteredTransactions, displayMonth]);
 
+  const monthlyBalance = useMemo(() => {
+    // 既存ロジックと同じだが、monthlyTransactionsを使えばシンプルになる
+    return monthlyTransactions.reduce((sum, t) => sum + t.amount, 0);
+  }, [monthlyTransactions]);
+
+  // ★変更: ソート対象を monthlyTransactions に変更（リスト表示時用）
   const sortedTransactions = useMemo(() => {
-    const sorted = [...filteredTransactions];
+    // リストモードのときは「その月」のデータのみソートする
+    const target = viewMode === 'list' ? monthlyTransactions : filteredTransactions;
+    const sorted = [...target];
     sorted.sort((a, b) => {
       switch (sortOrder) {
         case 'date-desc': return b.date.localeCompare(a.date);
@@ -310,7 +316,7 @@ export default function Home() {
       }
     });
     return sorted;
-  }, [filteredTransactions, sortOrder]);
+  }, [monthlyTransactions, filteredTransactions, viewMode, sortOrder]);
 
   const prevMonth = () => setDisplayMonth(subMonths(displayMonth, 1));
   const nextMonth = () => setDisplayMonth(addMonths(displayMonth, 1));
@@ -329,7 +335,6 @@ export default function Home() {
           </CardHeader>
           <CardContent>
             <form onSubmit={handleAuth} className="space-y-4">
-              {/* ... (ログインフォーム) ... */}
               {!isLoginMode && (
                 <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
                   <label className="text-sm font-medium">お名前 (ニックネーム)</label>
@@ -407,7 +412,6 @@ export default function Home() {
 
         {currentHousehold && (
           <>
-            {/* メンバーフィルタ */}
             {members.length > 1 && (
               <div className="bg-white p-2 rounded-lg shadow-sm border border-slate-100 overflow-x-auto">
                 <div className="flex items-center gap-2 text-xs font-bold text-slate-500 mb-1 px-1">
@@ -434,10 +438,8 @@ export default function Home() {
               </div>
             )}
 
-            {/* コンテンツエリア */}
             {viewMode === 'calendar' ? (
               <div className="space-y-4">
-                {/* ★変更: カレンダーと一体化したヘッダー */}
                 <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
                   <div className="bg-slate-50/50 border-b border-slate-100 p-4 flex flex-col items-center">
                     <div className="flex items-center justify-between w-full px-4 mb-2">
@@ -460,12 +462,14 @@ export default function Home() {
               </div>
             ) : viewMode === 'list' ? (
               <div className="space-y-4">
-                {/* リスト表示時のヘッダー（戻るボタン） */}
-                <div className="flex items-center gap-2 mb-2">
+                {/* ★追加: リスト表示時のヘッダー（年月表示と戻るボタン） */}
+                <div className="flex items-center justify-between mb-2">
                   <Button variant="outline" size="sm" onClick={() => setViewMode('history')} className="gap-1">
-                    <ArrowLeft className="w-4 h-4" /> 履歴へ戻る
+                    <ArrowLeft className="w-4 h-4" /> 履歴へ
                   </Button>
-                  <span className="text-sm font-bold text-slate-500">日別詳細リスト</span>
+                  <span className="text-sm font-bold text-slate-500">
+                    {format(displayMonth, 'yyyy年 M月', { locale: ja })}
+                  </span>
                 </div>
 
                 <div className="flex justify-end mb-2">
@@ -487,7 +491,7 @@ export default function Home() {
                   <div className="space-y-2">{[1,2,3].map(i => <div key={i} className="h-16 bg-slate-200 rounded-lg animate-pulse" />)}</div>
                 ) : sortedTransactions.length === 0 ? (
                   <div className="text-center py-12 bg-white rounded-xl border border-dashed border-slate-300">
-                    <p className="text-slate-400 text-sm">表示するデータがありません</p>
+                    <p className="text-slate-400 text-sm">この月のデータはありません</p>
                   </div>
                 ) : (
                   sortedTransactions.map((t) => (
@@ -498,14 +502,15 @@ export default function Home() {
             ) : viewMode === 'analysis' ? (
               <AnalysisView transactions={filteredTransactions} />
             ) : (
-              // 履歴ビュー (日別タブ切り替え用関数を渡す)
               <HistoryView 
                 transactions={filteredTransactions} 
-                onSwitchToDaily={() => setViewMode('list')}
+                onSelectMonth={(date) => {
+                  setDisplayMonth(date);
+                  setViewMode('list');
+                }}
               />
             )}
 
-            {/* ★広告スペース (コンテンツの下、タブバーの上) */}
             <div className="mt-6 mb-2">
               <div className="w-full h-16 bg-slate-100 rounded-lg border border-dashed border-slate-200 flex items-center justify-center text-xs text-slate-400 overflow-hidden relative mx-auto max-w-sm">
                   <span className="z-10 font-medium">広告スペース</span>
@@ -513,7 +518,6 @@ export default function Home() {
               </div>
             </div>
 
-            {/* タブナビゲーション (リストを削除し3つに) */}
             <div className="fixed bottom-4 left-4 right-4 max-w-md mx-auto z-50">
                <div className="bg-white/90 backdrop-blur-md p-1.5 rounded-2xl shadow-xl border border-slate-200/60 flex justify-around items-center">
                 {[
@@ -542,7 +546,6 @@ export default function Home() {
         )}
       </main>
 
-      {/* 設定モーダル等は変更なし */}
       <Dialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen}>
         <DialogContent className="max-w-[90%] rounded-xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
