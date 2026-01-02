@@ -1,34 +1,48 @@
-import React from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Transaction } from '@/types';
+import { TransactionItem } from '@/components/TransactionItem'; // リスト表示用コンポーネントをインポート
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, isSameMonth, isSameDay, parseISO } from 'date-fns';
 import { ja } from 'date-fns/locale';
 
 type Props = {
   transactions: Transaction[];
   onSelectTransaction: (t: Transaction) => void;
-  currentDate: Date; // ★追加: 親から表示する月を受け取る
+  currentDate: Date;
 };
 
 export const CalendarView = ({ transactions, onSelectTransaction, currentDate }: Props) => {
-  // カレンダーのグリッド生成（表示月の開始日〜終了日を含む週全体）
+  // 選択された日付を管理するステート
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+
+  // 表示月が変わったら選択状態をリセット（または初期化）
+  useEffect(() => {
+    setSelectedDate(null);
+  }, [currentDate]);
+
+  // カレンダーのグリッド生成
   const monthStart = startOfMonth(currentDate);
   const monthEnd = endOfMonth(monthStart);
-  const startDate = startOfWeek(monthStart, { locale: ja }); // 月曜始まり等の調整が必要ならここで行う
+  const startDate = startOfWeek(monthStart, { locale: ja });
   const endDate = endOfWeek(monthEnd, { locale: ja });
 
   const calendarDays = eachDayOfInterval({ start: startDate, end: endDate });
-
   const weekDays = ['日', '月', '火', '水', '木', '金', '土'];
 
-  // 日付ごとの収支計算
+  // 日付ごとのデータ取得ヘルパー
   const getDayData = (date: Date) => {
     const dayTrans = transactions.filter(t => t.date && isSameDay(parseISO(t.date), date));
     const total = dayTrans.reduce((sum, t) => sum + t.amount, 0);
     return { transactions: dayTrans, total };
   };
 
+  // 選択された日のデータリスト
+  const selectedDayTransactions = useMemo(() => {
+    if (!selectedDate) return [];
+    return transactions.filter(t => t.date && isSameDay(parseISO(t.date), selectedDate));
+  }, [selectedDate, transactions]);
+
   return (
-    <div className="w-full bg-white text-sm">
+    <div className="w-full bg-white text-sm pb-4">
       {/* 曜日ヘッダー */}
       <div className="grid grid-cols-7 border-b border-slate-100 bg-slate-50">
         {weekDays.map((day, i) => (
@@ -39,26 +53,29 @@ export const CalendarView = ({ transactions, onSelectTransaction, currentDate }:
       </div>
 
       {/* 日付グリッド */}
-      <div className="grid grid-cols-7 auto-rows-[minmax(60px,1fr)]">
+      <div className="grid grid-cols-7 auto-rows-[minmax(60px,1fr)] border-b border-slate-100">
         {calendarDays.map((day, dayIdx) => {
           const { transactions: dayTrans, total } = getDayData(day);
           const isCurrentMonth = isSameMonth(day, monthStart);
           const isPositive = total > 0;
           const isNegative = total < 0;
+          
+          // 選択中の日付かどうか
+          const isSelected = selectedDate && isSameDay(day, selectedDate);
 
           return (
             <div
               key={day.toString()}
               className={`
-                relative border-b border-r border-slate-100 p-1 flex flex-col items-center justify-start transition-colors
+                relative border-b border-r border-slate-100 p-1 flex flex-col items-center justify-start transition-all
                 ${!isCurrentMonth ? 'bg-slate-50/50 text-slate-300' : 'bg-white text-slate-700'}
-                ${dayTrans.length > 0 ? 'cursor-pointer hover:bg-blue-50' : ''}
+                ${dayTrans.length > 0 ? 'cursor-pointer hover:bg-slate-50' : ''}
+                ${isSelected ? 'bg-blue-50 ring-2 ring-inset ring-blue-400 z-10' : ''}
               `}
-              // 日付セル全体をクリックしたら、その日の最初のデータを編集（簡易的な挙動）
-              // ※本来は「その日のリスト」を開くのがベストですが、ここでは編集フォームを開く仕様に合わせています
               onClick={() => {
-                if (dayTrans.length > 0) {
-                  onSelectTransaction(dayTrans[0]);
+                // データがある日、または同月内の日なら選択可能にする
+                if (dayTrans.length > 0 || isCurrentMonth) {
+                  setSelectedDate(day);
                 }
               }}
             >
@@ -74,7 +91,6 @@ export const CalendarView = ({ transactions, onSelectTransaction, currentDate }:
                   <span className={`text-[10px] font-bold ${isPositive ? 'text-blue-600' : isNegative ? 'text-red-500' : 'text-slate-400'}`}>
                     {total > 0 ? '+' : ''}{total.toLocaleString()}
                   </span>
-                  {/* 件数バッジ (SPで見やすいように) */}
                   <div className="flex gap-0.5 mt-0.5 flex-wrap justify-center">
                     {dayTrans.map((t, i) => (
                       <div 
@@ -89,6 +105,32 @@ export const CalendarView = ({ transactions, onSelectTransaction, currentDate }:
           );
         })}
       </div>
+
+      {/* 選択された日の詳細リスト表示エリア */}
+      {selectedDate && (
+        <div className="pt-4 px-4 animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="flex items-center gap-2 mb-2 text-sm font-bold text-slate-500">
+            <span>{format(selectedDate, 'M月d日', { locale: ja })}の収支</span>
+            <div className="flex-1 h-px bg-slate-200"></div>
+          </div>
+          
+          {selectedDayTransactions.length === 0 ? (
+            <div className="text-center py-6 text-slate-400 text-xs">
+              記録がありません
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {selectedDayTransactions.map((t) => (
+                <TransactionItem 
+                  key={t.id} 
+                  transaction={t} 
+                  onClick={onSelectTransaction} 
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
