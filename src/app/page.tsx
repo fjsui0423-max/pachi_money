@@ -462,7 +462,7 @@ export default function Home() {
                       {currentBalance >= 0 ? '+' : ''}{currentBalance.toLocaleString()}
                     </div>
                   </div>
-                  <CalendarView transactions={filteredTransactions} onSelectTransaction={openEditForm} />
+                  <CalendarView transactions={filteredTransactions} onSelectTransaction={openEditForm} currentDate={displayMonth} />
                 </div>
               </div>
             ) : viewMode === 'list' ? (
