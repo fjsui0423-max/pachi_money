@@ -7,18 +7,17 @@ import { TransactionItem } from '@/components/TransactionItem';
 import { EntryForm } from '@/components/EntryForm';
 import { CalendarView } from '@/components/CalendarView';
 import { HistoryView } from '@/components/HistoryView';
-// ★追加: アバターアップロード
 import { AvatarUpload } from '@/components/AvatarUpload';
 import dynamic from 'next/dynamic';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { 
-  Plus, LogOut, Users, Wallet, Settings, Trash2, AlertTriangle, 
+  LogOut, Users, Wallet, Settings, Trash2,
   List, Calendar as CalendarIcon, NotebookPen, PieChart, History,
   ChevronLeft, ChevronRight, ArrowUpDown, Filter, Save, Lock, UserCircle
 } from 'lucide-react';
@@ -78,7 +77,7 @@ export default function Home() {
   useEffect(() => {
     if (user) {
       checkPendingInvite();
-      getProfile(); // プロフィール取得
+      getProfile();
     }
   }, [user]);
 
@@ -90,13 +89,12 @@ export default function Home() {
     }
   };
 
-  // ★プロフィールの取得
   const getProfile = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const { data, error,status } = await supabase
+      const { data, error, status } = await supabase
         .from('profiles')
         .select('username, avatar_url')
         .eq('id', user.id)
@@ -116,7 +114,6 @@ export default function Home() {
     }
   };
 
-  // ★プロフィールの更新
   const updateProfile = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -133,8 +130,7 @@ export default function Home() {
       if (error) throw error;
       
       alert('プロフィールを更新しました！');
-      getProfile(); // 再取得
-      // 他のメンバーに変更を反映させるためデータをリフレッシュ
+      getProfile();
       if (currentHousehold) fetchTransactions(); 
     } catch (error) {
       alert('更新に失敗しました');
@@ -205,13 +201,12 @@ export default function Home() {
     }
   };
 
-  // ★修正: transactions取得時にprofilesのavatar_urlも取得
   const fetchTransactions = async () => {
     if (!currentHousehold) return;
     setLoading(true);
     const { data } = await supabase
       .from('transactions')
-      .select('*, profiles(username, avatar_url)') // avatar_url追加
+      .select('*, profiles(username, avatar_url)')
       .eq('household_id', currentHousehold.id);
     if (data) setTransactions(data as Transaction[]);
     setLoading(false);
@@ -420,38 +415,31 @@ export default function Home() {
         {currentHousehold && (
           <>
             {viewMode !== 'history' && (
-              <Card className="bg-slate-900 text-white shadow-lg border-none overflow-hidden relative">
-                <CardContent className="p-4 sm:p-6">
-                  <div className="flex justify-between items-center mb-2 relative z-10">
-                    <Button variant="ghost" size="icon" onClick={prevMonth} className="h-8 w-8 text-slate-300 hover:text-white hover:bg-white/10">
-                      <ChevronLeft className="w-5 h-5" />
-                    </Button>
-                    <span className="font-bold text-lg tracking-widest">
-                      {format(displayMonth, 'yyyy.MM', { locale: ja })}
+              <>
+                <div className="bg-white p-2 rounded-xl shadow-sm border border-slate-100 flex items-center justify-between">
+                  <Button variant="ghost" size="icon" onClick={prevMonth} className="text-slate-400 hover:text-slate-600">
+                    <ChevronLeft className="w-6 h-6" />
+                  </Button>
+                  
+                  <div className="flex flex-col items-center">
+                    <span className="text-xs font-bold text-slate-400 mb-0.5 tracking-wider">
+                      {format(displayMonth, 'yyyy年 M月', { locale: ja })}
                     </span>
-                    <Button variant="ghost" size="icon" onClick={nextMonth} className="h-8 w-8 text-slate-300 hover:text-white hover:bg-white/10">
-                      <ChevronRight className="w-5 h-5" />
-                    </Button>
-                  </div>
-                  <div className="flex justify-center items-baseline gap-1 relative z-10">
-                    <h2 className={`text-4xl sm:text-5xl font-mono font-bold tracking-tight ${monthlyBalance >= 0 ? 'text-blue-400' : 'text-red-400'}`}>
+                    <div className={`text-2xl font-mono font-bold tracking-tight ${monthlyBalance >= 0 ? 'text-blue-600' : 'text-red-500'}`}>
                       {monthlyBalance >= 0 ? '+' : ''}{monthlyBalance.toLocaleString()}
-                    </h2>
+                    </div>
                   </div>
-                  <div className="text-center mt-2 relative z-10">
-                    <Button 
-                      variant="ghost" size="sm" 
-                      className="h-6 text-[10px] text-white bg-white/10 hover:bg-white/20 rounded-full px-3"
-                      onClick={copyInviteLink}
-                    >
-                      <Users className="w-3 h-3 mr-1" /> 招待リンク
-                    </Button>
-                  </div>
-                  <div className="absolute right-[-20px] bottom-[-40px] opacity-10 pointer-events-none">
-                    <Wallet className="w-48 h-48" />
-                  </div>
-                </CardContent>
-              </Card>
+
+                  <Button variant="ghost" size="icon" onClick={nextMonth} className="text-slate-400 hover:text-slate-600">
+                    <ChevronRight className="w-6 h-6" />
+                  </Button>
+                </div>
+
+                <div className="w-full h-14 bg-slate-100 rounded-lg border border-dashed border-slate-200 flex items-center justify-center text-xs text-slate-400 overflow-hidden relative">
+                    <span className="z-10 font-medium">広告スペース</span>
+                    <div className="absolute inset-0 opacity-5 bg-[radial-gradient(#cbd5e1_1px,transparent_1px)] [background-size:8px_8px]"></div>
+                </div>
+              </>
             )}
 
             {members.length > 1 && (
@@ -540,7 +528,6 @@ export default function Home() {
         )}
       </main>
 
-      {/* 設定モーダル */}
       <Dialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen}>
         <DialogContent className="max-w-[90%] rounded-xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -549,7 +536,6 @@ export default function Home() {
           
           <div className="space-y-6 py-4">
             
-            {/* ★1. アカウント設定 (新規) */}
             <div className="space-y-4 border p-4 rounded-lg bg-blue-50/50">
               <Label className="flex items-center gap-2 text-base text-blue-800">
                 <UserCircle className="w-5 h-5" /> アカウント設定
@@ -576,7 +562,6 @@ export default function Home() {
               </div>
             </div>
 
-            {/* 2. グループ設定 */}
             <div className="space-y-4 border p-4 rounded-lg bg-slate-50">
                <Label className="flex items-center gap-2 text-base text-slate-800">
                 <Settings className="w-5 h-5" /> グループ設定
@@ -613,6 +598,17 @@ export default function Home() {
                   />
                 </div>
               )}
+
+              <div className="pt-2 text-center">
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  className="h-8 text-xs text-slate-500 hover:text-blue-600"
+                  onClick={copyInviteLink}
+                >
+                  <Users className="w-3 h-3 mr-1" /> 招待リンクをコピー
+                </Button>
+              </div>
             </div>
 
             <Button variant="outline" className="w-full justify-start h-12" onClick={handleLogout}>
