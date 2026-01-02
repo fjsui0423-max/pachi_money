@@ -9,6 +9,7 @@ export type Household = {
   name: string;
   owner_id: string;
   invite_token: string;
+  is_edit_restricted: boolean;
 };
 
 export type Transaction = {
@@ -42,3 +43,7 @@ export type MasterItem = {
   category: 'shop' | 'machine';
   name: string;
 };
+// ... (他の型定義はそのまま)
+
+
+// ...
