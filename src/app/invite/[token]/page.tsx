@@ -26,24 +26,23 @@ export default function InvitePage() {
     const { data: { session } } = await supabase.auth.getSession();
     setUser(session?.user || null);
 
-    // 2. トークンから家計簿情報を検索
+    // 2. トークンから家計簿情報を検索 (RPCを使用)
+    // ★変更: 直接selectするのではなく、作成した関数経由で取得する
     const { data, error } = await supabase
-      .from('households')
-      .select('id, name, owner_id')
-      .eq('invite_token', token)
-      .single();
+      .rpc('get_household_by_token', { lookup_token: token });
 
-    if (error || !data) {
+    if (error || !data || data.length === 0) {
+      console.error(error);
       setError('招待リンクが無効か、有効期限切れです。');
     } else {
-      setHousehold(data);
+      // dataは配列で返ってくるので先頭を取得
+      setHousehold(data[0]);
     }
     setLoading(false);
   };
 
   const handleJoin = async () => {
     if (!user) {
-      // 未ログインならトップへ飛ばす（本来はログイン後にリダイレクトさせるのが親切ですが今回は簡易実装）
       alert('参加するにはログインが必要です。トップページへ移動します。');
       router.push('/');
       return;
@@ -61,7 +60,6 @@ export default function InvitePage() {
         });
 
       if (error) {
-        // すでにメンバーの場合のエラーコード: 23505 (unique_violation)
         if (error.code === '23505') {
           alert('すでにこのグループに参加しています。');
         } else {
@@ -71,7 +69,6 @@ export default function InvitePage() {
         alert(`${household.name} に参加しました！`);
       }
       
-      // トップページへ戻る
       router.push('/');
     } catch (err) {
       console.error(err);
@@ -110,7 +107,7 @@ export default function InvitePage() {
             <>
               <div className="bg-slate-50 p-6 rounded-xl border border-slate-200">
                 <p className="text-sm text-slate-500 mb-1">グループ名</p>
-                <h2 className="text-2xl font-bold text-slate-800">{household.name}</h2>
+                <h2 className="text-2xl font-bold text-slate-800">{household?.name}</h2>
               </div>
 
               {!user ? (
@@ -127,7 +124,7 @@ export default function InvitePage() {
               <Button 
                 onClick={handleJoin} 
                 className="w-full h-12 text-lg font-bold bg-blue-600 hover:bg-blue-700"
-                disabled={!user} // 未ログイン時は押せない（トップへ誘導）
+                disabled={!user} 
               >
                 参加する
               </Button>
