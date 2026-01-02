@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval, subMonths } from 'date-fns';
 import { ja } from 'date-fns/locale';
-import { Trophy, TrendingUp, BarChart3, Store, Gamepad2, ChevronRight, ArrowUpRight, ArrowDownRight } from 'lucide-react';
+import { BarChart3, Store, Gamepad2, ChevronRight, TrendingUp } from 'lucide-react';
 
 type Props = {
   transactions: Transaction[];
@@ -92,6 +92,12 @@ export const AnalysisView = ({ transactions, onSelectMachine, onSelectShop }: Pr
   const machineData = useMemo(() => aggregate('machine_name'), [transactions]);
   const shopData = useMemo(() => aggregate('shop_name'), [transactions]);
 
+  // 金額フォーマッター
+  const formatYAxis = (val: number) => {
+    if (Math.abs(val) >= 10000) return `${(val / 10000).toFixed(0)}万`;
+    return `${(val / 1000).toFixed(0)}k`;
+  };
+
   return (
     <div className="space-y-4 pb-24">
       <Tabs defaultValue="trend" className="w-full">
@@ -101,21 +107,31 @@ export const AnalysisView = ({ transactions, onSelectMachine, onSelectShop }: Pr
           <TabsTrigger value="shop"><Store className="w-4 h-4 mr-2" />店舗別</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="trend" className="space-y-6 animate-in fade-in zoom-in-95 duration-200">
+        <TabsContent value="trend" className="space-y-6">
+          
           {/* 月別収支グラフ */}
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-bold text-slate-500">月別収支 (直近1年)</CardTitle>
             </CardHeader>
-            <CardContent className="h-[200px] w-full">
+            <CardContent className="h-[250px] w-full pt-2">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={monthlyData}>
+                <BarChart data={monthlyData} margin={{ top: 10, right: 10, left: 0, bottom: 20 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                  <XAxis dataKey="name" tick={{fontSize: 10}} axisLine={false} tickLine={false} />
-                  <YAxis hide />
+                  <XAxis 
+                    dataKey="name" 
+                    tick={{fontSize: 10}} 
+                  />
+                  <YAxis 
+                    width={40} 
+                    tick={{fontSize: 10}} 
+                    tickFormatter={formatYAxis}
+                  />
+                  {/* 修正箇所 1: 引数の型を number | undefined にし、?? 0 で安全に処理 */}
                   <Tooltip 
                     cursor={{fill: '#f8fafc'}}
                     contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}}
+                    formatter={(val: number | undefined) => [`${(val ?? 0).toLocaleString()}円`, '収支']}
                   />
                   <ReferenceLine y={0} stroke="#cbd5e1" />
                   <Bar dataKey="balance" radius={[4, 4, 0, 0]}>
@@ -131,16 +147,33 @@ export const AnalysisView = ({ transactions, onSelectMachine, onSelectShop }: Pr
           {/* 資産推移グラフ */}
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-bold text-slate-500">資産推移</CardTitle>
+              <CardTitle className="text-sm font-bold text-slate-500 flex items-center gap-2">
+                <TrendingUp className="w-4 h-4" />
+                資産推移
+              </CardTitle>
             </CardHeader>
-            <CardContent className="h-[200px] w-full">
+            <CardContent className="h-[250px] w-full pt-2">
                <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={assetData}>
+                <LineChart data={assetData} margin={{ top: 10, right: 10, left: 0, bottom: 20 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                  <XAxis dataKey="date" tick={false} axisLine={false} tickLine={false} />
-                  <YAxis domain={['auto', 'auto']} hide />
+                  <XAxis 
+                    dataKey="date" 
+                    tickFormatter={(val) => {
+                      try { return format(parseISO(val), 'M/d'); } catch { return val; }
+                    }}
+                    tick={{fontSize: 10}} 
+                    minTickGap={30}
+                  />
+                  <YAxis 
+                    width={40} 
+                    tick={{fontSize: 10}} 
+                    tickFormatter={formatYAxis} 
+                    domain={['auto', 'auto']}
+                  />
+                  {/* 修正箇所 2: 引数の型を number | undefined にし、?? 0 で安全に処理 */}
                   <Tooltip 
                     labelFormatter={(label) => label}
+                    formatter={(val: number | undefined) => [`${(val ?? 0).toLocaleString()}円`, '資産']}
                     contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}}
                   />
                   <ReferenceLine y={0} stroke="#cbd5e1" strokeDasharray="3 3" />
@@ -151,11 +184,11 @@ export const AnalysisView = ({ transactions, onSelectMachine, onSelectShop }: Pr
           </Card>
         </TabsContent>
 
-        <TabsContent value="machine" className="animate-in fade-in slide-in-from-right-4 duration-200">
+        <TabsContent value="machine">
           <RankingList data={machineData} type="machine" onSelect={onSelectMachine} />
         </TabsContent>
 
-        <TabsContent value="shop" className="animate-in fade-in slide-in-from-right-4 duration-200">
+        <TabsContent value="shop">
           <RankingList data={shopData} type="shop" onSelect={onSelectShop} />
         </TabsContent>
       </Tabs>
