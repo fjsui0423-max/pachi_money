@@ -1,9 +1,13 @@
-import React from 'react';
+"use client";
+
+import React, { useEffect, useState } from 'react';
 import { Transaction } from '@/types';
 import { Card } from '@/components/ui/card';
-import { Store, Gamepad2, User } from 'lucide-react';
+import { Store, Gamepad2 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { ja } from 'date-fns/locale';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'; // 追加
+import { supabase } from '@/lib/supabase';
 
 type Props = {
   transaction: Transaction;
@@ -19,8 +23,21 @@ export const TransactionItem = ({ transaction, onClick }: Props) => {
   const dateObj = parseISO(transaction.date);
   const dateStr = format(dateObj, 'M/d(E)', { locale: ja });
 
-  // ユーザー名 (取得できない場合は未設定とする)
-  const userName = transaction.profiles?.username || '不明なユーザー';
+  // ユーザー情報
+  // @ts-ignore
+  const userName = transaction.profiles?.username || '不明';
+  // @ts-ignore
+  const avatarPath = transaction.profiles?.avatar_url;
+
+  // アバター画像のURL取得
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (avatarPath) {
+      const { data } = supabase.storage.from('avatars').getPublicUrl(avatarPath);
+      setAvatarUrl(data.publicUrl);
+    }
+  }, [avatarPath]);
 
   return (
     <Card 
@@ -29,22 +46,27 @@ export const TransactionItem = ({ transaction, onClick }: Props) => {
     >
       <div className="flex flex-col gap-1">
         
-        {/* 上段: 日付・ユーザー・機種名・収支 */}
+        {/* 上段 */}
         <div className="flex justify-between items-start">
           <div className="flex flex-col gap-1 overflow-hidden">
             <div className="flex items-center gap-2 text-xs">
-               {/* 日付バッジ */}
               <span className="font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
                 {dateStr}
               </span>
-              {/* ★ユーザー名表示 */}
-              <div className="flex items-center text-slate-400">
-                <User className="w-3 h-3 mr-0.5" />
-                <span className="truncate max-w-[80px]">{userName}</span>
+              
+              {/* ★アイコン表示 */}
+              <div className="flex items-center gap-1.5 bg-white border border-slate-100 rounded-full pr-2 py-0.5 pl-0.5">
+                <Avatar className="w-4 h-4">
+                  <AvatarImage src={avatarUrl || ''} />
+                  <AvatarFallback className="text-[8px] bg-slate-200">
+                    {userName.slice(0, 1)}
+                  </AvatarFallback>
+                </Avatar>
+                <span className="truncate max-w-[80px] text-slate-600 font-bold">{userName}</span>
               </div>
             </div>
             
-            <div className="flex items-center gap-1 overflow-hidden">
+            <div className="flex items-center gap-1 overflow-hidden mt-0.5">
               <Gamepad2 className="w-4 h-4 text-gray-400 shrink-0" />
               <span className="font-bold text-gray-800 truncate text-sm sm:text-base">
                 {transaction.machine_name || '機種名なし'}
@@ -57,7 +79,7 @@ export const TransactionItem = ({ transaction, onClick }: Props) => {
           </span>
         </div>
 
-        {/* 下段: 店舗名と投資/回収 */}
+        {/* 下段 */}
         <div className="flex justify-between items-end text-xs text-gray-500 mt-1">
           <div className="flex items-center gap-1 max-w-[50%]">
             <Store className="w-3 h-3 text-gray-400 shrink-0" />

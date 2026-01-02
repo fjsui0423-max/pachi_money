@@ -7,6 +7,8 @@ import { TransactionItem } from '@/components/TransactionItem';
 import { EntryForm } from '@/components/EntryForm';
 import { CalendarView } from '@/components/CalendarView';
 import { HistoryView } from '@/components/HistoryView';
+// ★追加: アバターアップロード
+import { AvatarUpload } from '@/components/AvatarUpload';
 import dynamic from 'next/dynamic';
 
 import { Button } from '@/components/ui/button';
@@ -14,11 +16,11 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch'; // もしSwitchがない場合はCheckboxでも可
+import { Switch } from '@/components/ui/switch';
 import { 
   Plus, LogOut, Users, Wallet, Settings, Trash2, AlertTriangle, 
   List, Calendar as CalendarIcon, NotebookPen, PieChart, History,
-  ChevronLeft, ChevronRight, ArrowUpDown, Filter, Save, Lock
+  ChevronLeft, ChevronRight, ArrowUpDown, Filter, Save, Lock, UserCircle
 } from 'lucide-react';
 import { format, addMonths, subMonths, startOfMonth, endOfMonth, isWithinInterval, parseISO } from 'date-fns';
 import { ja } from 'date-fns/locale';
@@ -32,7 +34,6 @@ const AnalysisView = dynamic(
 );
 
 export default function Home() {
-  // --- 認証ステート ---
   const [user, setUser] = useState<any>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -40,16 +41,18 @@ export default function Home() {
   const [isLoginMode, setIsLoginMode] = useState(true);
   const [authLoading, setAuthLoading] = useState(false);
 
-  // --- データステート ---
+  // --- アカウント設定用 ---
+  const [profile, setProfile] = useState<any>(null);
+  const [editUsername, setEditUsername] = useState('');
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+
   const [households, setHouseholds] = useState<Household[]>([]);
   const [currentHousehold, setCurrentHousehold] = useState<Household | null>(null);
-  
   const [members, setMembers] = useState<HouseholdMember[]>([]);
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // --- UIステート ---
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
@@ -58,7 +61,6 @@ export default function Home() {
   const [displayMonth, setDisplayMonth] = useState(new Date());
   const [sortOrder, setSortOrder] = useState<'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc'>('date-desc');
 
-  // --- 設定編集用ステート ---
   const [editGroupName, setEditGroupName] = useState('');
   const [isEditRestricted, setIsEditRestricted] = useState(false);
 
@@ -68,23 +70,74 @@ export default function Home() {
     if (currentHousehold) {
       fetchTransactions();
       fetchMembers();
-      // 設定用ステートの初期化
       setEditGroupName(currentHousehold.name);
       setIsEditRestricted(currentHousehold.is_edit_restricted || false);
     }
   }, [currentHousehold]);
 
   useEffect(() => {
-    if (user) checkPendingInvite();
+    if (user) {
+      checkPendingInvite();
+      getProfile(); // プロフィール取得
+    }
   }, [user]);
-
-  // --- API / Logic ---
 
   const checkUser = async () => {
     const { data: { session } } = await supabase.auth.getSession();
     if (session?.user) {
       setUser(session.user);
       fetchHouseholds(session.user.id);
+    }
+  };
+
+  // ★プロフィールの取得
+  const getProfile = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data, error,status } = await supabase
+        .from('profiles')
+        .select('username, avatar_url')
+        .eq('id', user.id)
+        .single();
+
+      if (error && status !== 406) {
+        throw error;
+      }
+
+      if (data) {
+        setProfile(data);
+        setEditUsername(data.username);
+        setAvatarUrl(data.avatar_url);
+      }
+    } catch (error) {
+      console.log('Error loading user data!');
+    }
+  };
+
+  // ★プロフィールの更新
+  const updateProfile = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('No user');
+
+      const updates = {
+        id: user.id,
+        username: editUsername,
+        avatar_url: avatarUrl,
+        updated_at: new Date(),
+      };
+
+      const { error } = await supabase.from('profiles').upsert(updates);
+      if (error) throw error;
+      
+      alert('プロフィールを更新しました！');
+      getProfile(); // 再取得
+      // 他のメンバーに変更を反映させるためデータをリフレッシュ
+      if (currentHousehold) fetchTransactions(); 
+    } catch (error) {
+      alert('更新に失敗しました');
     }
   };
 
@@ -145,13 +198,25 @@ export default function Home() {
       setCurrentHousehold((prev) => {
         if (!prev) return list[0];
         const stillExists = list.find(h => h.id === prev.id);
-        return stillExists ? stillExists : list[0]; // 情報を更新するために新しいオブジェクトを選択
+        return stillExists ? stillExists : list[0]; 
       });
     } else {
       setHouseholds([]); setCurrentHousehold(null);
     }
   };
 
+  // ★修正: transactions取得時にprofilesのavatar_urlも取得
+  const fetchTransactions = async () => {
+    if (!currentHousehold) return;
+    setLoading(true);
+    const { data } = await supabase
+      .from('transactions')
+      .select('*, profiles(username, avatar_url)') // avatar_url追加
+      .eq('household_id', currentHousehold.id);
+    if (data) setTransactions(data as Transaction[]);
+    setLoading(false);
+  };
+  
   const fetchMembers = async () => {
     if (!currentHousehold) return;
     const { data } = await supabase
@@ -162,7 +227,6 @@ export default function Home() {
     if (data) {
       const mems = data as unknown as HouseholdMember[];
       setMembers(mems);
-      // メンバー増減時のリセット等は任意（ここでは維持するが、初回のみ全員選択）
       if (selectedMemberIds.length === 0) setSelectedMemberIds(mems.map(m => m.user_id));
     }
   };
@@ -172,54 +236,42 @@ export default function Home() {
     if (!name || !user) return;
     try {
       const { data: newHousehold, error: hError } = await supabase.from('households')
-        .insert({ name, owner_id: user.id, is_edit_restricted: false }).select().single(); // デフォルトは誰でも編集可
+        .insert({ name, owner_id: user.id, is_edit_restricted: false }).select().single(); 
       if (hError) throw hError;
       await supabase.from('household_members').insert({ household_id: newHousehold.id, user_id: user.id });
       await fetchHouseholds(user.id);
     } catch (err) { alert("作成失敗"); }
   };
 
-  // ★グループ情報の更新 (名前変更・権限設定)
   const updateHousehold = async () => {
     if (!currentHousehold || !user) return;
-    
-    // 権限チェック
     const isOwner = currentHousehold.owner_id === user.id;
     if (!isOwner && currentHousehold.is_edit_restricted) {
       alert("オーナーの設定により、グループ名の変更は許可されていません。");
       return;
     }
-
     try {
       const { error } = await supabase
         .from('households')
-        .update({ 
-          name: editGroupName,
-          // 権限設定はオーナーのみ変更可能
-          is_edit_restricted: isOwner ? isEditRestricted : currentHousehold.is_edit_restricted 
-        })
+        .update({ name: editGroupName, is_edit_restricted: isOwner ? isEditRestricted : currentHousehold.is_edit_restricted })
         .eq('id', currentHousehold.id);
-
       if (error) throw error;
       alert("設定を更新しました");
-      fetchHouseholds(user.id); // 最新情報を再取得
+      fetchHouseholds(user.id); 
       setIsSettingsOpen(false);
-    } catch (err) {
-      alert("更新に失敗しました");
-    }
+    } catch (err) { alert("更新に失敗しました"); }
   };
 
   const deleteHousehold = async () => {
     if (!currentHousehold || !user) return;
     if (currentHousehold.owner_id !== user.id) {
-      alert("削除できるのは作成者のみです。\n参加者は削除できません。");
+      alert("削除できるのは作成者のみです。");
       return;
     }
-    if (!confirm(`本当に「${currentHousehold.name}」を削除しますか？\n他のメンバーのデータはバックアップされます。`)) return;
+    if (!confirm(`本当に「${currentHousehold.name}」を削除しますか？`)) return;
 
     try {
       setLoading(true);
-      // 他メンバーの救済処理
       const { data: members } = await supabase.from('household_members').select('user_id').eq('household_id', currentHousehold.id).neq('user_id', user.id);
       if (members) {
         for (const m of members) {
@@ -236,17 +288,6 @@ export default function Home() {
     } catch (err) { alert('削除失敗'); } finally { setLoading(false); }
   };
 
-  const fetchTransactions = async () => {
-    if (!currentHousehold) return;
-    setLoading(true);
-    const { data } = await supabase
-      .from('transactions')
-      .select('*, profiles(username)')
-      .eq('household_id', currentHousehold.id);
-    if (data) setTransactions(data as Transaction[]);
-    setLoading(false);
-  };
-
   const openNewForm = () => { setEditingTransaction(null); setIsFormOpen(true); };
   const openEditForm = (t: Transaction) => { setEditingTransaction(t); setIsFormOpen(true); };
 
@@ -257,7 +298,6 @@ export default function Home() {
     alert('招待URLをコピーしました！');
   };
 
-  // --- Filter & Sort Logic ---
   const filteredTransactions = useMemo(() => {
     if (selectedMemberIds.length === 0) return [];
     return transactions.filter(t => selectedMemberIds.includes(t.user_id));
@@ -287,12 +327,11 @@ export default function Home() {
 
   const prevMonth = () => setDisplayMonth(subMonths(displayMonth, 1));
   const nextMonth = () => setDisplayMonth(addMonths(displayMonth, 1));
-  
   const toggleMember = (userId: string) => {
     setSelectedMemberIds(prev => prev.includes(userId) ? prev.filter(id => id !== userId) : [...prev, userId]);
   };
+  const isOwner = currentHousehold?.owner_id === user?.id;
 
-  // --- Rendering ---
   if (!user) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4">
@@ -331,8 +370,6 @@ export default function Home() {
       </div>
     );
   }
-
-  const isOwner = currentHousehold?.owner_id === user.id;
 
   return (
     <div className="min-h-screen bg-slate-50 pb-24 safe-area-padding">
@@ -493,7 +530,6 @@ export default function Home() {
                 )}
               </div>
             ) : viewMode === 'calendar' ? (
-              // ★修正: 編集用関数を渡す
               <CalendarView transactions={filteredTransactions} onSelectTransaction={openEditForm} />
             ) : viewMode === 'analysis' ? (
               <AnalysisView transactions={filteredTransactions} />
@@ -506,15 +542,45 @@ export default function Home() {
 
       {/* 設定モーダル */}
       <Dialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen}>
-        <DialogContent className="max-w-[90%] rounded-xl">
+        <DialogContent className="max-w-[90%] rounded-xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>グループ設定</DialogTitle>
-            <DialogDescription>ID: {currentHousehold?.id.slice(0, 8)}...</DialogDescription>
+            <DialogTitle>設定</DialogTitle>
           </DialogHeader>
           
           <div className="space-y-6 py-4">
-            {/* 1. グループ名・権限設定 */}
+            
+            {/* ★1. アカウント設定 (新規) */}
+            <div className="space-y-4 border p-4 rounded-lg bg-blue-50/50">
+              <Label className="flex items-center gap-2 text-base text-blue-800">
+                <UserCircle className="w-5 h-5" /> アカウント設定
+              </Label>
+              
+              <AvatarUpload 
+                url={avatarUrl} 
+                onUpload={(url) => { setAvatarUrl(url); }}
+              />
+
+              <div className="space-y-2">
+                <Label>ユーザー名</Label>
+                <div className="flex gap-2">
+                  <Input 
+                    value={editUsername} 
+                    onChange={e => setEditUsername(e.target.value)} 
+                    placeholder="ユーザー名を入力"
+                    className="bg-white"
+                  />
+                  <Button onClick={updateProfile}>
+                    <Save className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            {/* 2. グループ設定 */}
             <div className="space-y-4 border p-4 rounded-lg bg-slate-50">
+               <Label className="flex items-center gap-2 text-base text-slate-800">
+                <Settings className="w-5 h-5" /> グループ設定
+              </Label>
               <div className="space-y-2">
                 <Label>グループ名</Label>
                 <div className="flex gap-2">
@@ -522,6 +588,7 @@ export default function Home() {
                     value={editGroupName} 
                     onChange={e => setEditGroupName(e.target.value)} 
                     disabled={!isOwner && currentHousehold?.is_edit_restricted}
+                    className="bg-white"
                   />
                   <Button onClick={updateHousehold} disabled={!isOwner && currentHousehold?.is_edit_restricted}>
                     <Save className="w-4 h-4" />
@@ -532,21 +599,17 @@ export default function Home() {
                 )}
               </div>
 
-              {/* オーナーのみ表示される権限スイッチ */}
               {isOwner && (
                 <div className="flex items-center justify-between border-t pt-4">
                   <div className="space-y-0.5">
-                    <Label className="text-base flex items-center gap-2">
+                    <Label className="text-sm flex items-center gap-2">
                       <Lock className="w-4 h-4" /> 編集制限
                     </Label>
-                    <p className="text-xs text-slate-500">メンバーによるグループ名の変更を禁止する</p>
+                    <p className="text-xs text-slate-500">メンバーによるグループ名の変更を禁止</p>
                   </div>
-                  {/* SwitchがなければCheckboxで代用可 */}
-                  <input 
-                    type="checkbox" 
-                    className="w-5 h-5"
+                  <Switch
                     checked={isEditRestricted}
-                    onChange={e => setIsEditRestricted(e.target.checked)}
+                    onCheckedChange={setIsEditRestricted}
                   />
                 </div>
               )}
