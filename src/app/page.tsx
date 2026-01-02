@@ -33,18 +33,14 @@ export default function Home() {
   const [user, setUser] = useState<any>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  // ★追加: 新規登録用の名前
   const [username, setUsername] = useState('');
   const [isLoginMode, setIsLoginMode] = useState(true);
   const [authLoading, setAuthLoading] = useState(false);
 
   const [households, setHouseholds] = useState<Household[]>([]);
   const [currentHousehold, setCurrentHousehold] = useState<Household | null>(null);
-  
-  // ★追加: グループメンバーと選択状態(フィルタリング用)
   const [members, setMembers] = useState<HouseholdMember[]>([]);
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
-
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -57,7 +53,7 @@ export default function Home() {
   const [sortOrder, setSortOrder] = useState<'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc'>('date-desc');
 
   useEffect(() => { checkUser(); }, []);
-  // 家計簿が変わったら、取引とメンバーを再取得
+  
   useEffect(() => { 
     if (currentHousehold) {
       fetchTransactions();
@@ -65,7 +61,13 @@ export default function Home() {
     }
   }, [currentHousehold]);
 
-  // 認証・初期化
+  // ★追加: ユーザーログイン時に保留中の招待があれば処理する
+  useEffect(() => {
+    if (user) {
+      checkPendingInvite();
+    }
+  }, [user]);
+
   const checkUser = async () => {
     const { data: { session } } = await supabase.auth.getSession();
     if (session?.user) {
@@ -74,22 +76,61 @@ export default function Home() {
     }
   };
 
+  // ★追加: 保留中の招待トークンをチェックして参加する関数
+  const checkPendingInvite = async () => {
+    const pendingToken = localStorage.getItem('pendingInviteToken');
+    if (!pendingToken || !user) return;
+
+    try {
+      // 1. トークンから家計簿IDを取得 (RPC)
+      const { data, error } = await supabase.rpc('get_household_by_token', { lookup_token: pendingToken });
+      
+      if (error || !data || data.length === 0) {
+        console.error("Invalid invite token");
+        localStorage.removeItem('pendingInviteToken');
+        return;
+      }
+      
+      const householdToJoin = data[0];
+
+      // 2. メンバーに参加
+      const { error: joinError } = await supabase
+        .from('household_members')
+        .insert({
+          household_id: householdToJoin.id,
+          user_id: user.id,
+          role: 'member'
+        });
+
+      // エラーが「既に参加済み」以外ならアラート
+      if (joinError && joinError.code !== '23505') {
+        throw joinError;
+      }
+
+      // 3. 成功したらトークン削除 & リスト更新 & 通知
+      localStorage.removeItem('pendingInviteToken');
+      alert(`グループ「${householdToJoin.name}」に参加しました！`);
+      
+      // リストを再取得して、参加したグループを選択状態にする
+      await fetchHouseholds(user.id);
+      
+    } catch (err) {
+      console.error("Auto join failed:", err);
+    }
+  };
+
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthLoading(true);
     try {
       if (isLoginMode) {
-        // ログイン
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
       } else {
-        // 新規登録 (名前もメタデータとして保存)
         const { error } = await supabase.auth.signUp({ 
           email, 
           password,
-          options: {
-            data: { username: username || '名無し' } // ユーザー名を保存
-          }
+          options: { data: { username: username || '名無し' } }
         });
         if (error) throw error;
         alert('登録完了！ログインします。');
@@ -120,6 +161,9 @@ export default function Home() {
     if (members && members.length > 0) {
       const list = members.map((m: any) => m.households) as Household[];
       setHouseholds(list);
+      // ★修正: リスト更新時、もし現在選択中のものがなければ先頭を選ぶが、
+      // 参加直後かもしれないので、最新のもの(リストの末尾など)を選ぶロジックも検討できるが、
+      // ここでは既存ロジック(現在選択中維持 or 先頭)のままとする。
       setCurrentHousehold((prev) => {
         if (!prev) return list[0];
         const stillExists = list.find(h => h.id === prev.id);
@@ -131,7 +175,6 @@ export default function Home() {
     }
   };
 
-  // ★追加: グループメンバーを取得
   const fetchMembers = async () => {
     if (!currentHousehold) return;
     const { data } = await supabase
@@ -140,9 +183,12 @@ export default function Home() {
       .eq('household_id', currentHousehold.id);
 
     if (data) {
-      const mems = data as unknown as HouseholdMember[]; // 型変換
+      const mems = data as unknown as HouseholdMember[];
       setMembers(mems);
-      // 初期値は全員選択
+      // メンバーが増減したかもしれないので選択状態をリセット(全員選択)
+      // ただしユーザーが意図して絞り込んでいる最中かもしれないので、
+      // 「まだ選択されていない新しいメンバーがいれば追加」程度にするのが親切だが、
+      // 簡易的に「全員選択」にリセットする (または以前の選択を維持しつつ新規を追加)
       setSelectedMemberIds(mems.map(m => m.user_id));
     }
   };
@@ -175,7 +221,6 @@ export default function Home() {
   const fetchTransactions = async () => {
     if (!currentHousehold) return;
     setLoading(true);
-    // ★変更: profiles(username) も結合して取得
     const { data } = await supabase
       .from('transactions')
       .select('*, profiles(username)')
@@ -195,13 +240,11 @@ export default function Home() {
     alert('招待URLをコピーしました！');
   };
 
-  // ★重要: フィルタリングされたトランザクション
   const filteredTransactions = useMemo(() => {
     if (selectedMemberIds.length === 0) return [];
     return transactions.filter(t => selectedMemberIds.includes(t.user_id));
   }, [transactions, selectedMemberIds]);
 
-  // 表示月の収支 (フィルタ済みデータを使用)
   const monthlyBalance = useMemo(() => {
     const start = startOfMonth(displayMonth);
     const end = endOfMonth(displayMonth);
@@ -213,7 +256,6 @@ export default function Home() {
       .reduce((sum, t) => sum + t.amount, 0);
   }, [filteredTransactions, displayMonth]);
 
-  // リスト用ソート (フィルタ済みデータを使用)
   const sortedTransactions = useMemo(() => {
     const sorted = [...filteredTransactions];
     sorted.sort((a, b) => {
@@ -231,11 +273,9 @@ export default function Home() {
   const prevMonth = () => setDisplayMonth(subMonths(displayMonth, 1));
   const nextMonth = () => setDisplayMonth(addMonths(displayMonth, 1));
 
-  // メンバーフィルタの切り替え処理
   const toggleMember = (userId: string) => {
     setSelectedMemberIds(prev => {
       if (prev.includes(userId)) {
-        // 少なくとも1人は残す (または全員外すと0件になる)
         return prev.filter(id => id !== userId);
       } else {
         return [...prev, userId];
@@ -254,7 +294,6 @@ export default function Home() {
           </CardHeader>
           <CardContent>
             <form onSubmit={handleAuth} className="space-y-4">
-              {/* ★追加: 新規登録時のみ名前入力欄を表示 */}
               {!isLoginMode && (
                 <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
                   <label className="text-sm font-medium">お名前 (ニックネーム)</label>
@@ -293,7 +332,6 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-slate-50 pb-24 safe-area-padding">
-      {/* Stickyヘッダー */}
       <header className="bg-white/90 backdrop-blur-md border-b sticky top-0 z-10 px-4 py-3 flex justify-between items-center shadow-sm">
         <div className="flex items-center gap-2 flex-1 min-w-0 mr-2">
           <Wallet className="w-6 h-6 text-blue-600 shrink-0" />
@@ -340,7 +378,6 @@ export default function Home() {
 
         {currentHousehold && (
           <>
-            {/* ★トップカード (月別収支) */}
             {viewMode !== 'history' && (
               <Card className="bg-slate-900 text-white shadow-lg border-none overflow-hidden relative">
                 <CardContent className="p-4 sm:p-6">
@@ -379,7 +416,6 @@ export default function Home() {
               </Card>
             )}
 
-            {/* ★メンバー絞り込みフィルタ (UI) */}
             {members.length > 1 && (
               <div className="bg-white p-2 rounded-lg shadow-sm border border-slate-100 overflow-x-auto">
                 <div className="flex items-center gap-2 text-xs font-bold text-slate-500 mb-1 px-1">
@@ -399,7 +435,6 @@ export default function Home() {
                             : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'}
                         `}
                       >
-                        {/* チェックマーク */}
                         <div className={`w-2 h-2 rounded-full ${isSelected ? 'bg-white' : 'bg-slate-300'}`} />
                         {member.profiles?.username || '名無し'}
                       </button>
@@ -409,7 +444,6 @@ export default function Home() {
               </div>
             )}
 
-            {/* タブ切り替え */}
             <div className="bg-slate-200 p-1 rounded-lg flex mb-4 overflow-x-auto">
               {[
                 { id: 'list', label: 'リスト', icon: List },
@@ -430,7 +464,6 @@ export default function Home() {
               ))}
             </div>
 
-            {/* コンテンツエリア (フィルタ済みデータを渡す) */}
             {viewMode === 'list' ? (
               <div className="pb-4">
                 <div className="flex justify-end mb-2">

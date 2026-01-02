@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useEffect, useState } from 'react';
@@ -5,7 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Loader2, Users, CheckCircle, AlertCircle } from 'lucide-react';
+import { Loader2, Users, CheckCircle, AlertCircle, LogIn } from 'lucide-react';
 
 export default function InvitePage() {
   const params = useParams();
@@ -18,6 +19,10 @@ export default function InvitePage() {
   const token = params.token as string;
 
   useEffect(() => {
+    // ★追加: アクセス時にトークンをブラウザに一時保存
+    if (token) {
+      localStorage.setItem('pendingInviteToken', token);
+    }
     checkUserAndInvite();
   }, [token]);
 
@@ -27,15 +32,15 @@ export default function InvitePage() {
     setUser(session?.user || null);
 
     // 2. トークンから家計簿情報を検索 (RPCを使用)
-    // ★変更: 直接selectするのではなく、作成した関数経由で取得する
     const { data, error } = await supabase
       .rpc('get_household_by_token', { lookup_token: token });
 
     if (error || !data || data.length === 0) {
       console.error(error);
       setError('招待リンクが無効か、有効期限切れです。');
+      // 無効な場合は保存したトークンも消しておく
+      localStorage.removeItem('pendingInviteToken');
     } else {
-      // dataは配列で返ってくるので先頭を取得
       setHousehold(data[0]);
     }
     setLoading(false);
@@ -43,14 +48,13 @@ export default function InvitePage() {
 
   const handleJoin = async () => {
     if (!user) {
-      alert('参加するにはログインが必要です。トップページへ移動します。');
+      // 未ログインの場合、トップページへ誘導（トークンはlocalStorageにあるので安心）
       router.push('/');
       return;
     }
 
     try {
       setLoading(true);
-      // メンバーに追加
       const { error } = await supabase
         .from('household_members')
         .insert({
@@ -67,6 +71,8 @@ export default function InvitePage() {
         }
       } else {
         alert(`${household.name} に参加しました！`);
+        // 参加完了したのでトークンを削除
+        localStorage.removeItem('pendingInviteToken');
       }
       
       router.push('/');
@@ -111,28 +117,32 @@ export default function InvitePage() {
               </div>
 
               {!user ? (
-                <div className="text-sm text-amber-600 bg-amber-50 p-3 rounded-md">
-                  ※ 参加するにはログインが必要です
+                <div className="space-y-4">
+                   <div className="text-sm text-amber-600 bg-amber-50 p-3 rounded-md">
+                    参加するにはログインまたは新規登録が必要です
+                  </div>
+                  {/* 未ログイン時のボタン */}
+                  <Button 
+                    onClick={() => router.push('/')} 
+                    className="w-full h-12 text-lg font-bold bg-blue-600 hover:bg-blue-700"
+                  >
+                    <LogIn className="w-4 h-4 mr-2" />
+                    ログイン / 新規登録へ
+                  </Button>
                 </div>
               ) : (
-                <div className="flex items-center justify-center gap-2 text-sm text-green-600 bg-green-50 p-2 rounded-md">
-                  <CheckCircle className="w-4 h-4" />
-                  ログイン中: {user.email}
-                </div>
-              )}
-
-              <Button 
-                onClick={handleJoin} 
-                className="w-full h-12 text-lg font-bold bg-blue-600 hover:bg-blue-700"
-                disabled={!user} 
-              >
-                参加する
-              </Button>
-              
-              {!user && (
-                <Button variant="link" onClick={() => router.push('/')}>
-                  ログイン画面へ戻る
-                </Button>
+                <>
+                  <div className="flex items-center justify-center gap-2 text-sm text-green-600 bg-green-50 p-2 rounded-md">
+                    <CheckCircle className="w-4 h-4" />
+                    ログイン中: {user.email}
+                  </div>
+                  <Button 
+                    onClick={handleJoin} 
+                    className="w-full h-12 text-lg font-bold bg-blue-600 hover:bg-blue-700"
+                  >
+                    参加する
+                  </Button>
+                </>
               )}
             </>
           )}
