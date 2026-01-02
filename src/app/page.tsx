@@ -19,7 +19,8 @@ import { Switch } from '@/components/ui/switch';
 import { 
   LogOut, Users, Wallet, Settings, Trash2,
   Calendar as CalendarIcon, NotebookPen, PieChart, History,
-  ChevronLeft, ChevronRight, ArrowUpDown, Filter, Save, Lock, UserCircle, ArrowLeft, X
+  ChevronLeft, ChevronRight, ArrowUpDown, Filter, Save, Lock, UserCircle, ArrowLeft, X,
+  DoorOpen // ★追加: 退出用アイコン
 } from 'lucide-react';
 import { format, addMonths, subMonths, startOfMonth, endOfMonth, isWithinInterval, parseISO, startOfYear, endOfYear } from 'date-fns';
 import { ja } from 'date-fns/locale';
@@ -56,11 +57,9 @@ export default function Home() {
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   
   const [viewMode, setViewMode] = useState<'calendar' | 'list' | 'analysis' | 'history'>('calendar');
-  // ★変更: 'all' を追加（全期間表示用）
   const [viewRange, setViewRange] = useState<'month' | 'year' | 'all'>('month');
   const [displayMonth, setDisplayMonth] = useState(new Date());
   
-  // ★追加: フィルタリング条件（分析画面からのドリルダウン用）
   const [filterCondition, setFilterCondition] = useState<{ type: 'shop' | 'machine' | null, value: string }>({ type: null, value: '' });
   
   const [sortOrder, setSortOrder] = useState<'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc' | 'shop-asc' | 'machine-asc'>('date-desc');
@@ -220,6 +219,42 @@ export default function Home() {
     } catch (err) { alert('削除失敗'); } finally { setLoading(false); }
   };
 
+  // ★追加: グループ退出機能
+  const leaveHousehold = async () => {
+    if (!currentHousehold || !user) return;
+    
+    // オーナーチェック
+    if (currentHousehold.owner_id === user.id) {
+      alert("オーナーはグループを退出できません。グループを削除するか、設定変更を行ってください。");
+      return;
+    }
+
+    if (!confirm(`本当に「${currentHousehold.name}」から退出しますか？\n退出すると、このグループの記録は見られなくなります。`)) return;
+
+    try {
+      setLoading(true);
+      
+      const { error } = await supabase
+        .from('household_members')
+        .delete()
+        .eq('household_id', currentHousehold.id)
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      alert("グループから退出しました。");
+      setIsSettingsOpen(false);
+      // グループリストを再取得（退出したグループはリストから消える）
+      await fetchHouseholds(user.id);
+      
+    } catch (err) {
+      console.error(err);
+      alert('退出処理に失敗しました。');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const openNewForm = () => { setEditingTransaction(null); setIsFormOpen(true); };
   const openEditForm = (t: Transaction) => { setEditingTransaction(t); setIsFormOpen(true); };
 
@@ -234,11 +269,9 @@ export default function Home() {
     return transactions.filter(t => selectedMemberIds.includes(t.user_id));
   }, [transactions, selectedMemberIds]);
 
-  // ★変更: フィルタリングロジックの強化 (期間 + 機種/店舗)
   const displayedTransactions = useMemo(() => {
     let filtered = filteredTransactions;
 
-    // 1. 期間フィルタ (viewRange === 'all' の場合は期間フィルタをスキップ)
     if (viewRange !== 'all') {
       let start, end;
       if (viewRange === 'year') {
@@ -251,7 +284,6 @@ export default function Home() {
       filtered = filtered.filter(t => t.date && isWithinInterval(parseISO(t.date), { start, end }));
     }
 
-    // 2. 機種・店舗フィルタ (filterCondition がある場合)
     if (filterCondition.type === 'shop') {
       filtered = filtered.filter(t => t.shop_name === filterCondition.value);
     } else if (filterCondition.type === 'machine') {
@@ -302,17 +334,14 @@ export default function Home() {
   };
   const isOwner = currentHousehold?.owner_id === user?.id;
 
-  // フィルタ解除処理
   const clearFilter = () => {
     setFilterCondition({ type: null, value: '' });
     if (viewRange === 'all') {
-      setViewRange('month'); // 通常モードに戻す
+      setViewRange('month'); 
     }
   };
 
-  // ビューモード切替時の処理
   const handleViewModeChange = (mode: any) => {
-    // 別のタブに切り替えるときはフィルタを解除する（使いやすさのため）
     if (mode !== 'list' && filterCondition.type !== null) {
       clearFilter();
     }
@@ -326,7 +355,6 @@ export default function Home() {
   if (!user) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4">
-        {/* ... (ログインフォームは変更なし) ... */}
         <Card className="w-full max-w-md shadow-xl border-0">
           <CardHeader>
             <CardTitle className="text-center text-2xl font-bold text-slate-800">Pachi-Money</CardTitle>
@@ -408,7 +436,6 @@ export default function Home() {
       <main className="max-w-md mx-auto p-4 space-y-4">
         {households.length === 0 && (
           <div className="text-center py-20 px-4">
-             {/* ... (グループなし画面) ... */}
             <Wallet className="w-16 h-16 text-slate-300 mx-auto mb-4" />
             <p className="mb-6 text-slate-500 font-bold">まだ家計簿がありません</p>
             <Button onClick={createHousehold} className="w-full h-12 text-lg">最初のグループを作る</Button>
@@ -457,7 +484,6 @@ export default function Home() {
                         <ChevronRight className="w-4 h-4" />
                        </Button>
                     </div>
-                    {/* カレンダーモード用の集計（フィルタに関わらず月単位） */}
                     <div className={`text-xl font-mono font-bold tracking-tight ${currentBalance >= 0 ? 'text-blue-600' : 'text-red-500'}`}>
                       {currentBalance >= 0 ? '+' : ''}{currentBalance.toLocaleString()}
                     </div>
@@ -477,7 +503,6 @@ export default function Home() {
                     </span>
                   </div>
 
-                  {/* ★追加: フィルタリング中の表示 */}
                   {filterCondition.type && (
                     <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-lg p-2 text-xs">
                       <div className="flex items-center gap-2">
@@ -527,12 +552,12 @@ export default function Home() {
                 transactions={filteredTransactions} 
                 onSelectMachine={(name) => {
                   setFilterCondition({ type: 'machine', value: name });
-                  setViewRange('all'); // 全期間モードに切り替え
+                  setViewRange('all');
                   setViewMode('list');
                 }}
                 onSelectShop={(name) => {
                   setFilterCondition({ type: 'shop', value: name });
-                  setViewRange('all'); // 全期間モードに切り替え
+                  setViewRange('all');
                   setViewMode('list');
                 }}
               />
@@ -588,7 +613,6 @@ export default function Home() {
       </main>
 
       <Dialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen}>
-        {/* ... (設定モーダルは変更なし) ... */}
         <DialogContent className="max-w-[90%] rounded-xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>設定</DialogTitle>
@@ -656,9 +680,15 @@ export default function Home() {
             </Button>
             
             <div className="border-t pt-4">
-              <Button variant="destructive" className="w-full justify-start h-12" onClick={deleteHousehold}>
-                <Trash2 className="w-4 h-4 mr-2" /> グループ削除
-              </Button>
+              {isOwner ? (
+                <Button variant="destructive" className="w-full justify-start h-12" onClick={deleteHousehold}>
+                  <Trash2 className="w-4 h-4 mr-2" /> グループ削除
+                </Button>
+              ) : (
+                <Button variant="destructive" className="w-full justify-start h-12" onClick={leaveHousehold}>
+                  <DoorOpen className="w-4 h-4 mr-2" /> グループを退出
+                </Button>
+              )}
             </div>
           </div>
           <DialogFooter>
