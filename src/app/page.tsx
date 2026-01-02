@@ -219,32 +219,33 @@ export default function Home() {
     } catch (err) { alert('削除失敗'); } finally { setLoading(false); }
   };
 
-  // ★追加: グループ退出機能
+  // ★追加: グループ退出機能 (RPC関数呼び出し版)
   const leaveHousehold = async () => {
     if (!currentHousehold || !user) return;
     
     // オーナーチェック
     if (currentHousehold.owner_id === user.id) {
-      alert("オーナーはグループを退出できません。グループを削除するか、設定変更を行ってください。");
+      alert("オーナーはグループを退出できません。退出するには、グループを削除するか、他のメンバーにオーナー権限を譲渡（未実装）する必要があります。");
       return;
     }
 
-    if (!confirm(`本当に「${currentHousehold.name}」から退出しますか？\n退出すると、このグループの記録は見られなくなります。`)) return;
+    if (!confirm(`本当に「${currentHousehold.name}」から退出しますか？\n\n・あなたの記録データは削除されずに残ります。\n・退出後はこのグループが表示されなくなります。\n・招待リンクから再度参加すれば、元のデータにアクセスできます。`)) return;
 
     try {
       setLoading(true);
       
-      const { error } = await supabase
-        .from('household_members')
-        .delete()
-        .eq('household_id', currentHousehold.id)
-        .eq('user_id', user.id);
+      // SQL側で作成した leave_household 関数を呼び出す
+      const { error } = await supabase.rpc('leave_household', { 
+        target_household_id: currentHousehold.id 
+      });
 
       if (error) throw error;
 
       alert("グループから退出しました。");
       setIsSettingsOpen(false);
-      // グループリストを再取得（退出したグループはリストから消える）
+      setCurrentHousehold(null); // 現在の選択をクリア
+      
+      // グループリストを再取得（退出したグループがリストから消えます）
       await fetchHouseholds(user.id);
       
     } catch (err) {
@@ -436,6 +437,7 @@ export default function Home() {
       <main className="max-w-md mx-auto p-4 space-y-4">
         {households.length === 0 && (
           <div className="text-center py-20 px-4">
+             {/* ... (グループなし画面) ... */}
             <Wallet className="w-16 h-16 text-slate-300 mx-auto mb-4" />
             <p className="mb-6 text-slate-500 font-bold">まだ家計簿がありません</p>
             <Button onClick={createHousehold} className="w-full h-12 text-lg">最初のグループを作る</Button>
@@ -484,6 +486,7 @@ export default function Home() {
                         <ChevronRight className="w-4 h-4" />
                        </Button>
                     </div>
+                    {/* カレンダーモード用の集計（フィルタに関わらず月単位） */}
                     <div className={`text-xl font-mono font-bold tracking-tight ${currentBalance >= 0 ? 'text-blue-600' : 'text-red-500'}`}>
                       {currentBalance >= 0 ? '+' : ''}{currentBalance.toLocaleString()}
                     </div>
@@ -503,6 +506,7 @@ export default function Home() {
                     </span>
                   </div>
 
+                  {/* ★追加: フィルタリング中の表示 */}
                   {filterCondition.type && (
                     <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-lg p-2 text-xs">
                       <div className="flex items-center gap-2">
@@ -552,12 +556,12 @@ export default function Home() {
                 transactions={filteredTransactions} 
                 onSelectMachine={(name) => {
                   setFilterCondition({ type: 'machine', value: name });
-                  setViewRange('all');
+                  setViewRange('all'); // 全期間モードに切り替え
                   setViewMode('list');
                 }}
                 onSelectShop={(name) => {
                   setFilterCondition({ type: 'shop', value: name });
-                  setViewRange('all');
+                  setViewRange('all'); // 全期間モードに切り替え
                   setViewMode('list');
                 }}
               />
@@ -680,6 +684,7 @@ export default function Home() {
             </Button>
             
             <div className="border-t pt-4">
+              {/* ★変更: オーナーかどうかでボタンを出し分け */}
               {isOwner ? (
                 <Button variant="destructive" className="w-full justify-start h-12" onClick={deleteHousehold}>
                   <Trash2 className="w-4 h-4 mr-2" /> グループ削除
