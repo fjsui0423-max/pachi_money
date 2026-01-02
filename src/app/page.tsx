@@ -289,7 +289,6 @@ export default function Home() {
     return transactions.filter(t => selectedMemberIds.includes(t.user_id));
   }, [transactions, selectedMemberIds]);
 
-  // ★追加: リスト表示用に「表示中の月」でフィルタリング
   const monthlyTransactions = useMemo(() => {
     const start = startOfMonth(displayMonth);
     const end = endOfMonth(displayMonth);
@@ -297,13 +296,10 @@ export default function Home() {
   }, [filteredTransactions, displayMonth]);
 
   const monthlyBalance = useMemo(() => {
-    // 既存ロジックと同じだが、monthlyTransactionsを使えばシンプルになる
     return monthlyTransactions.reduce((sum, t) => sum + t.amount, 0);
   }, [monthlyTransactions]);
 
-  // ★変更: ソート対象を monthlyTransactions に変更（リスト表示時用）
   const sortedTransactions = useMemo(() => {
-    // リストモードのときは「その月」のデータのみソートする
     const target = viewMode === 'list' ? monthlyTransactions : filteredTransactions;
     const sorted = [...target];
     sorted.sort((a, b) => {
@@ -412,12 +408,11 @@ export default function Home() {
 
         {currentHousehold && (
           <>
+            {/* ★変更: メンバーフィルタをコンパクト化 */}
             {members.length > 1 && (
-              <div className="bg-white p-2 rounded-lg shadow-sm border border-slate-100 overflow-x-auto">
-                <div className="flex items-center gap-2 text-xs font-bold text-slate-500 mb-1 px-1">
-                  <Filter className="w-3 h-3" /> 表示対象:
-                </div>
-                <div className="flex gap-2">
+              <div className="bg-white px-3 py-2 rounded-lg shadow-sm border border-slate-100 flex items-center gap-3 overflow-hidden">
+                <Filter className="w-3 h-3 text-slate-400 shrink-0" />
+                <div className="flex gap-1.5 overflow-x-auto no-scrollbar">
                   {members.map(member => {
                     const isSelected = selectedMemberIds.includes(member.user_id);
                     return (
@@ -425,11 +420,11 @@ export default function Home() {
                         key={member.user_id}
                         onClick={() => toggleMember(member.user_id)}
                         className={`
-                          flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border
-                          ${isSelected ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'}
+                          flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-bold transition-all border whitespace-nowrap
+                          ${isSelected ? 'bg-blue-600 text-white border-blue-600 shadow-sm' : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'}
                         `}
                       >
-                        <div className={`w-2 h-2 rounded-full ${isSelected ? 'bg-white' : 'bg-slate-300'}`} />
+                        <div className={`w-1.5 h-1.5 rounded-full ${isSelected ? 'bg-white' : 'bg-slate-300'}`} />
                         {member.profiles?.username || '名無し'}
                       </button>
                     )
@@ -441,19 +436,20 @@ export default function Home() {
             {viewMode === 'calendar' ? (
               <div className="space-y-4">
                 <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                  <div className="bg-slate-50/50 border-b border-slate-100 p-4 flex flex-col items-center">
-                    <div className="flex items-center justify-between w-full px-4 mb-2">
-                       <Button variant="ghost" size="icon" onClick={prevMonth} className="h-8 w-8 text-slate-400">
-                        <ChevronLeft className="w-5 h-5" />
+                  {/* ★変更: カレンダーヘッダーをコンパクトな横並びに */}
+                  <div className="bg-slate-50/50 border-b border-slate-100 px-3 py-2 flex justify-between items-center">
+                    <div className="flex items-center gap-1">
+                       <Button variant="ghost" size="icon" onClick={prevMonth} className="h-7 w-7 text-slate-400 hover:text-slate-600">
+                        <ChevronLeft className="w-4 h-4" />
                        </Button>
-                       <span className="font-bold text-slate-600 text-lg">
+                       <span className="font-bold text-slate-700 text-base">
                          {format(displayMonth, 'yyyy年 M月', { locale: ja })}
                        </span>
-                       <Button variant="ghost" size="icon" onClick={nextMonth} className="h-8 w-8 text-slate-400">
-                        <ChevronRight className="w-5 h-5" />
+                       <Button variant="ghost" size="icon" onClick={nextMonth} className="h-7 w-7 text-slate-400 hover:text-slate-600">
+                        <ChevronRight className="w-4 h-4" />
                        </Button>
                     </div>
-                    <div className={`text-3xl font-mono font-bold tracking-tight ${monthlyBalance >= 0 ? 'text-blue-600' : 'text-red-500'}`}>
+                    <div className={`text-xl font-mono font-bold tracking-tight ${monthlyBalance >= 0 ? 'text-blue-600' : 'text-red-500'}`}>
                       {monthlyBalance >= 0 ? '+' : ''}{monthlyBalance.toLocaleString()}
                     </div>
                   </div>
@@ -462,10 +458,9 @@ export default function Home() {
               </div>
             ) : viewMode === 'list' ? (
               <div className="space-y-4">
-                {/* ★追加: リスト表示時のヘッダー（年月表示と戻るボタン） */}
                 <div className="flex items-center justify-between mb-2">
-                  <Button variant="outline" size="sm" onClick={() => setViewMode('history')} className="gap-1">
-                    <ArrowLeft className="w-4 h-4" /> 履歴へ
+                  <Button variant="outline" size="sm" onClick={() => setViewMode('history')} className="gap-1 h-8 text-xs">
+                    <ArrowLeft className="w-3 h-3" /> 履歴へ
                   </Button>
                   <span className="text-sm font-bold text-slate-500">
                     {format(displayMonth, 'yyyy年 M月', { locale: ja })}
@@ -474,9 +469,9 @@ export default function Home() {
 
                 <div className="flex justify-end mb-2">
                   <div className="relative">
-                    <ArrowUpDown className="absolute left-2 top-2.5 h-4 w-4 text-slate-500" />
+                    <ArrowUpDown className="absolute left-2 top-2 h-3.5 w-3.5 text-slate-500" />
                     <select 
-                      className="pl-8 pr-3 py-1.5 text-xs font-bold bg-white border border-slate-200 rounded-md outline-none focus:ring-2 focus:ring-blue-500"
+                      className="pl-7 pr-2 py-1 text-[11px] font-bold bg-white border border-slate-200 rounded-md outline-none focus:ring-1 focus:ring-blue-500"
                       value={sortOrder}
                       onChange={(e) => setSortOrder(e.target.value as any)}
                     >
