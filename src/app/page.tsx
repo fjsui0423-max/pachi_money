@@ -204,18 +204,76 @@ export default function Home() {
     } catch (err) { alert("作成失敗"); }
   };
 
-  const deleteHousehold = async () => {
+ const deleteHousehold = async () => {
     if (!currentHousehold || !user) return;
+
+    // オーナーチェック
     if (currentHousehold.owner_id !== user.id) {
-      alert("削除できるのは作成者のみです。");
+      alert("削除できるのは作成者（オーナー）のみです。\n参加者は削除できません（自動的に退出扱いにはなりません）。");
       return;
     }
-    if (!confirm(`本当に「${currentHousehold.name}」を削除しますか？`)) return;
+
+    if (!confirm(`本当に「${currentHousehold.name}」を削除しますか？\n\n【重要】\n・グループは消滅します\n・他のメンバーが記録したデータは、各個人の「${currentHousehold.name} (Backup)」という新しいグループに自動的に退避されます。\n・あなたのデータは削除されます。`)) return;
+
     try {
-      await supabase.from('households').delete().eq('id', currentHousehold.id);
+      setLoading(true);
+
+      // 1. 他のメンバーのデータを救済する処理
+      // (1-1) メンバー一覧取得 (自分以外)
+      const { data: members } = await supabase
+        .from('household_members')
+        .select('user_id')
+        .eq('household_id', currentHousehold.id)
+        .neq('user_id', user.id);
+
+      if (members && members.length > 0) {
+        // 各メンバーごとにバックアップ用グループを作成し、データを移行
+        for (const m of members) {
+          // A. バックアップグループ作成
+          const { data: backupHousehold } = await supabase
+            .from('households')
+            .insert({ 
+              name: `${currentHousehold.name} (Backup)`, 
+              owner_id: m.user_id 
+            })
+            .select()
+            .single();
+          
+          if (backupHousehold) {
+             // B. メンバー紐付け
+             await supabase.from('household_members').insert({
+               household_id: backupHousehold.id,
+               user_id: m.user_id,
+               role: 'owner' // バックアップのオーナーにする
+             });
+
+             // C. 取引データの引越し (そのユーザーのデータのみ)
+             await supabase
+               .from('transactions')
+               .update({ household_id: backupHousehold.id }) // 所属グループ書き換え
+               .eq('household_id', currentHousehold.id)
+               .eq('user_id', m.user_id);
+             
+             // D. マスターデータのコピー (必要なら)
+             // (今回は簡易化のためトランザクションのみ移動。マスターは再構築される)
+          }
+        }
+      }
+
+      // 2. グループ削除 (残ったオーナーのデータ等はCASCADE設定により自動削除)
+      const { error } = await supabase.from('households').delete().eq('id', currentHousehold.id);
+      
+      if (error) throw error;
+
+      alert('削除しました。他のメンバーのデータはバックアップされました。');
       setIsSettingsOpen(false);
       fetchHouseholds(user.id); 
-    } catch (err) { alert('削除失敗'); }
+    } catch (err) { 
+      console.error(err);
+      alert('削除処理中にエラーが発生しました'); 
+    } finally {
+      setLoading(false);
+    }
   };
 
   const fetchTransactions = async () => {

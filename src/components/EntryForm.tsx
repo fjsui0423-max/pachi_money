@@ -3,12 +3,14 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Transaction } from '@/types';
-import { Loader2, Save, Trash2, PlusCircle } from 'lucide-react'; // PlusCircle追加
+import { Loader2, Save, Trash2, PlusCircle, ChevronRight, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+// ★追加
+import { MasterListSelector } from './MasterListSelector';
 
 type Props = {
   isOpen: boolean;
@@ -29,7 +31,9 @@ export const EntryForm = ({ isOpen, onClose, onSuccess, householdId, initialData
   const [recovery, setRecovery] = useState('');
   const [memo, setMemo] = useState('');
 
-  const [history, setHistory] = useState<{ shops: string[], machines: string[] }>({ shops: [], machines: [] });
+  // ★追加: セレクター用ステート
+  const [selectorOpen, setSelectorOpen] = useState(false);
+  const [selectorCategory, setSelectorCategory] = useState<'shop' | 'machine'>('shop');
 
   useEffect(() => {
     if (isOpen) {
@@ -48,26 +52,9 @@ export const EntryForm = ({ isOpen, onClose, onSuccess, householdId, initialData
         setRecovery('');
         setMemo('');
       }
-      fetchHistory();
     }
   }, [isOpen, initialData, householdId]);
 
-  const fetchHistory = async () => {
-    if (!householdId) return;
-    const { data } = await supabase.from('transactions')
-      .select('shop_name, machine_name')
-      .eq('household_id', householdId)
-      .limit(50);
-    
-    if (data) {
-      setHistory({
-        shops: Array.from(new Set(data.map(d => d.shop_name).filter(Boolean))) as string[],
-        machines: Array.from(new Set(data.map(d => d.machine_name).filter(Boolean))) as string[],
-      });
-    }
-  };
-
-  // ★追加機能: 金額を加算するヘルパー関数
   const addAmount = (currentValue: string, setter: (val: string) => void, amount: number) => {
     const current = parseInt(currentValue || '0', 10);
     setter((current + amount).toString());
@@ -130,111 +117,132 @@ export const EntryForm = ({ isOpen, onClose, onSuccess, householdId, initialData
 
   const currentBalance = (parseInt(recovery || '0') - parseInt(investment || '0'));
 
+  // ★セレクターを開く関数
+  const openSelector = (cat: 'shop' | 'machine') => {
+    setSelectorCategory(cat);
+    setSelectorOpen(true);
+  };
+
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-md w-full max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>{initialData ? '記録の編集' : '新規記録'}</DialogTitle>
-        </DialogHeader>
+    <>
+      <Dialog open={isOpen} onOpenChange={onClose}>
+        <DialogContent className="max-w-md w-full max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{initialData ? '記録の編集' : '新規記録'}</DialogTitle>
+          </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="grid gap-4 py-2">
-          
-          <div className="grid gap-2">
-            <Label>日付</Label>
-            <Input type="date" value={date} onChange={e => setDate(e.target.value)} required />
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="grid gap-2">
-              <Label>店舗</Label>
-              <Input list="shop-list" value={shopName} onChange={e => setShopName(e.target.value)} placeholder="店名" />
-              <datalist id="shop-list">{history.shops.map(s => <option key={s} value={s} />)}</datalist>
-            </div>
-            <div className="grid gap-2">
-              <Label>機種</Label>
-              <Input list="machine-list" value={machineName} onChange={e => setMachineName(e.target.value)} placeholder="機種名" />
-              <datalist id="machine-list">{history.machines.map(m => <option key={m} value={m} />)}</datalist>
-            </div>
-          </div>
-
-          {/* 収支計算エリア (金額入力サポート付き) */}
-          <div className="grid grid-cols-2 gap-4 p-4 bg-slate-50 rounded-lg">
+          <form onSubmit={handleSubmit} className="grid gap-4 py-2">
             
-            {/* 投資 */}
             <div className="grid gap-2">
-              <Label className="text-red-500 font-bold">投資 (IN)</Label>
-              <Input 
-                type="number" 
-                value={investment} 
-                onChange={e => setInvestment(e.target.value)} 
-                className="text-right font-mono text-lg" 
-                placeholder="0" 
-              />
-              {/* 補助ボタン */}
-              <div className="flex gap-1 justify-end">
-                <Button type="button" variant="outline" size="sm" className="h-7 text-xs px-2" onClick={() => addAmount(investment, setInvestment, 1000)}>
-                  +1k
+              <Label>日付</Label>
+              <Input type="date" value={date} onChange={e => setDate(e.target.value)} required />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label>店舗</Label>
+                {/* ★変更: ボタン化 */}
+                <Button 
+                  type="button" 
+                  variant="outline" 
+                  className={`w-full justify-between font-normal ${!shopName && 'text-slate-400'}`}
+                  onClick={() => openSelector('shop')}
+                >
+                  <span className="truncate">{shopName || '店舗を選択'}</span>
+                  <ChevronRight className="w-4 h-4 opacity-50" />
                 </Button>
-                <Button type="button" variant="outline" size="sm" className="h-7 text-xs px-2" onClick={() => addAmount(investment, setInvestment, 5000)}>
-                  +5k
-                </Button>
-                <Button type="button" variant="outline" size="sm" className="h-7 text-xs px-2" onClick={() => addAmount(investment, setInvestment, 10000)}>
-                  +10k
+              </div>
+              <div className="grid gap-2">
+                <Label>機種</Label>
+                {/* ★変更: ボタン化 */}
+                <Button 
+                  type="button" 
+                  variant="outline" 
+                  className={`w-full justify-between font-normal ${!machineName && 'text-slate-400'}`}
+                  onClick={() => openSelector('machine')}
+                >
+                   <span className="truncate">{machineName || '機種を選択'}</span>
+                   <ChevronRight className="w-4 h-4 opacity-50" />
                 </Button>
               </div>
             </div>
 
-            {/* 回収 */}
-            <div className="grid gap-2">
-              <Label className="text-blue-500 font-bold">回収 (OUT)</Label>
-              <Input 
-                type="number" 
-                value={recovery} 
-                onChange={e => setRecovery(e.target.value)} 
-                className="text-right font-mono text-lg" 
-                placeholder="0" 
-              />
-              {/* 補助ボタン */}
-              <div className="flex gap-1 justify-end">
-                <Button type="button" variant="outline" size="sm" className="h-7 text-xs px-2" onClick={() => addAmount(recovery, setRecovery, 1000)}>
-                  +1k
-                </Button>
-                <Button type="button" variant="outline" size="sm" className="h-7 text-xs px-2" onClick={() => addAmount(recovery, setRecovery, 5000)}>
-                  +5k
-                </Button>
-                <Button type="button" variant="outline" size="sm" className="h-7 text-xs px-2" onClick={() => addAmount(recovery, setRecovery, 10000)}>
-                  +10k
-                </Button>
+            <div className="grid grid-cols-2 gap-4 p-4 bg-slate-50 rounded-lg">
+              {/* 投資 (変更なし) */}
+              <div className="grid gap-2">
+                <Label className="text-red-500 font-bold">投資 (IN)</Label>
+                <Input 
+                  type="number" 
+                  value={investment} 
+                  onChange={e => setInvestment(e.target.value)} 
+                  className="text-right font-mono text-lg" 
+                  placeholder="0" 
+                />
+                <div className="flex gap-1 justify-end">
+                  <Button type="button" variant="outline" size="sm" className="h-7 text-xs px-2" onClick={() => addAmount(investment, setInvestment, 1000)}>+1k</Button>
+                  <Button type="button" variant="outline" size="sm" className="h-7 text-xs px-2" onClick={() => addAmount(investment, setInvestment, 5000)}>+5k</Button>
+                  <Button type="button" variant="outline" size="sm" className="h-7 text-xs px-2" onClick={() => addAmount(investment, setInvestment, 10000)}>+10k</Button>
+                </div>
+              </div>
+
+              {/* 回収 (変更なし) */}
+              <div className="grid gap-2">
+                <Label className="text-blue-500 font-bold">回収 (OUT)</Label>
+                <Input 
+                  type="number" 
+                  value={recovery} 
+                  onChange={e => setRecovery(e.target.value)} 
+                  className="text-right font-mono text-lg" 
+                  placeholder="0" 
+                />
+                <div className="flex gap-1 justify-end">
+                  <Button type="button" variant="outline" size="sm" className="h-7 text-xs px-2" onClick={() => addAmount(recovery, setRecovery, 1000)}>+1k</Button>
+                  <Button type="button" variant="outline" size="sm" className="h-7 text-xs px-2" onClick={() => addAmount(recovery, setRecovery, 5000)}>+5k</Button>
+                  <Button type="button" variant="outline" size="sm" className="h-7 text-xs px-2" onClick={() => addAmount(recovery, setRecovery, 10000)}>+10k</Button>
+                </div>
+              </div>
+
+              <div className="col-span-2 flex justify-between border-t pt-2 mt-2">
+                <span className="font-bold text-sm">収支</span>
+                <span className={`font-mono font-bold text-lg ${currentBalance >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
+                  {currentBalance >= 0 ? '+' : ''}{currentBalance.toLocaleString()}
+                </span>
               </div>
             </div>
 
-            <div className="col-span-2 flex justify-between border-t pt-2 mt-2">
-              <span className="font-bold text-sm">収支</span>
-              <span className={`font-mono font-bold text-lg ${currentBalance >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
-                {currentBalance >= 0 ? '+' : ''}{currentBalance.toLocaleString()}
-              </span>
+            <div className="grid gap-2">
+              <Label>メモ</Label>
+              <Textarea value={memo} onChange={e => setMemo(e.target.value)} placeholder="狙い台、挙動など" />
             </div>
-          </div>
 
-          <div className="grid gap-2">
-            <Label>メモ</Label>
-            <Textarea value={memo} onChange={e => setMemo(e.target.value)} placeholder="狙い台、挙動など" />
-          </div>
-
-          <DialogFooter className="flex-col gap-2 sm:flex-row sm:justify-between mt-4">
-            {initialData && (
-              <Button type="button" variant="destructive" onClick={handleDelete} disabled={isDeleting} className="w-full sm:w-auto">
-                <Trash2 className="w-4 h-4 mr-2" /> 削除
+            <DialogFooter className="flex-col gap-2 sm:flex-row sm:justify-between mt-4">
+              {initialData && (
+                <Button type="button" variant="destructive" onClick={handleDelete} disabled={isDeleting} className="w-full sm:w-auto">
+                  <Trash2 className="w-4 h-4 mr-2" /> 削除
+                </Button>
+              )}
+              <Button type="submit" className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700" disabled={isLoading}>
+                {isLoading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                {initialData ? '更新する' : '記録する'}
               </Button>
-            )}
-            <Button type="submit" className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700" disabled={isLoading}>
-              {isLoading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-              {initialData ? '更新する' : '記録する'}
-            </Button>
-          </DialogFooter>
+            </DialogFooter>
 
-        </form>
-      </DialogContent>
-    </Dialog>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* ★リスト選択用モーダル */}
+      <MasterListSelector 
+        isOpen={selectorOpen}
+        onClose={() => setSelectorOpen(false)}
+        onSelect={(val) => {
+          if (selectorCategory === 'shop') setShopName(val);
+          else setMachineName(val);
+        }}
+        category={selectorCategory}
+        householdId={householdId || ''}
+        currentValue={selectorCategory === 'shop' ? shopName : machineName}
+      />
+    </>
   );
 };
