@@ -2,12 +2,11 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Household, Transaction } from '@/types';
+import { Household, Transaction, HouseholdMember } from '@/types';
 import { TransactionItem } from '@/components/TransactionItem';
 import { EntryForm } from '@/components/EntryForm';
 import { CalendarView } from '@/components/CalendarView';
-import { HistoryView } from '@/components/HistoryView'; // ★追加
-// AnalysisView は Dynamic Import
+import { HistoryView } from '@/components/HistoryView';
 import dynamic from 'next/dynamic';
 
 import { Button } from '@/components/ui/button';
@@ -16,8 +15,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { 
   Plus, LogOut, Users, Wallet, Settings, Trash2, AlertTriangle, 
-  List, Calendar as CalendarIcon, NotebookPen, PieChart, History, // ★History追加
-  ChevronLeft, ChevronRight, ArrowUpDown // ★アイコン追加
+  List, Calendar as CalendarIcon, NotebookPen, PieChart, History,
+  ChevronLeft, ChevronRight, ArrowUpDown, Filter
 } from 'lucide-react';
 import { format, addMonths, subMonths, startOfMonth, endOfMonth, isWithinInterval, parseISO } from 'date-fns';
 import { ja } from 'date-fns/locale';
@@ -34,11 +33,18 @@ export default function Home() {
   const [user, setUser] = useState<any>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  // ★追加: 新規登録用の名前
+  const [username, setUsername] = useState('');
   const [isLoginMode, setIsLoginMode] = useState(true);
   const [authLoading, setAuthLoading] = useState(false);
 
   const [households, setHouseholds] = useState<Household[]>([]);
   const [currentHousehold, setCurrentHousehold] = useState<Household | null>(null);
+  
+  // ★追加: グループメンバーと選択状態(フィルタリング用)
+  const [members, setMembers] = useState<HouseholdMember[]>([]);
+  const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
+
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -46,17 +52,18 @@ export default function Home() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   
-  // ★タブ状態に 'history' を追加
   const [viewMode, setViewMode] = useState<'list' | 'calendar' | 'analysis' | 'history'>('list');
-
-  // ★トップカード用の表示月ステート
   const [displayMonth, setDisplayMonth] = useState(new Date());
-
-  // ★リストのソート順ステート
   const [sortOrder, setSortOrder] = useState<'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc'>('date-desc');
 
   useEffect(() => { checkUser(); }, []);
-  useEffect(() => { if (currentHousehold) fetchTransactions(); }, [currentHousehold]);
+  // 家計簿が変わったら、取引とメンバーを再取得
+  useEffect(() => { 
+    if (currentHousehold) {
+      fetchTransactions();
+      fetchMembers();
+    }
+  }, [currentHousehold]);
 
   // 認証・初期化
   const checkUser = async () => {
@@ -71,11 +78,22 @@ export default function Home() {
     e.preventDefault();
     setAuthLoading(true);
     try {
-      const { error } = isLoginMode 
-        ? await supabase.auth.signInWithPassword({ email, password })
-        : await supabase.auth.signUp({ email, password });
-      if (error) throw error;
-      if (!isLoginMode) alert('登録完了！ログインします。');
+      if (isLoginMode) {
+        // ログイン
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+      } else {
+        // 新規登録 (名前もメタデータとして保存)
+        const { error } = await supabase.auth.signUp({ 
+          email, 
+          password,
+          options: {
+            data: { username: username || '名無し' } // ユーザー名を保存
+          }
+        });
+        if (error) throw error;
+        alert('登録完了！ログインします。');
+      }
       checkUser();
     } catch (err: any) {
       alert(err.message);
@@ -89,6 +107,7 @@ export default function Home() {
     setUser(null);
     setHouseholds([]);
     setTransactions([]);
+    setMembers([]);
     setCurrentHousehold(null);
   };
 
@@ -109,6 +128,22 @@ export default function Home() {
     } else {
       setHouseholds([]);
       setCurrentHousehold(null);
+    }
+  };
+
+  // ★追加: グループメンバーを取得
+  const fetchMembers = async () => {
+    if (!currentHousehold) return;
+    const { data } = await supabase
+      .from('household_members')
+      .select('user_id, role, profiles(username)')
+      .eq('household_id', currentHousehold.id);
+
+    if (data) {
+      const mems = data as unknown as HouseholdMember[]; // 型変換
+      setMembers(mems);
+      // 初期値は全員選択
+      setSelectedMemberIds(mems.map(m => m.user_id));
     }
   };
 
@@ -140,11 +175,12 @@ export default function Home() {
   const fetchTransactions = async () => {
     if (!currentHousehold) return;
     setLoading(true);
+    // ★変更: profiles(username) も結合して取得
     const { data } = await supabase
       .from('transactions')
-      .select('*')
+      .select('*, profiles(username)')
       .eq('household_id', currentHousehold.id);
-    // ソートはクライアント側で行うため、ここでは取得のみ
+    
     if (data) setTransactions(data as Transaction[]);
     setLoading(false);
   };
@@ -159,21 +195,27 @@ export default function Home() {
     alert('招待URLをコピーしました！');
   };
 
-  // ★トップカード用: 表示月の収支計算
+  // ★重要: フィルタリングされたトランザクション
+  const filteredTransactions = useMemo(() => {
+    if (selectedMemberIds.length === 0) return [];
+    return transactions.filter(t => selectedMemberIds.includes(t.user_id));
+  }, [transactions, selectedMemberIds]);
+
+  // 表示月の収支 (フィルタ済みデータを使用)
   const monthlyBalance = useMemo(() => {
     const start = startOfMonth(displayMonth);
     const end = endOfMonth(displayMonth);
-    return transactions
+    return filteredTransactions
       .filter(t => {
         if(!t.date) return false;
         return isWithinInterval(parseISO(t.date), { start, end });
       })
       .reduce((sum, t) => sum + t.amount, 0);
-  }, [transactions, displayMonth]);
+  }, [filteredTransactions, displayMonth]);
 
-  // ★リスト用: ソート済みのトランザクション
+  // リスト用ソート (フィルタ済みデータを使用)
   const sortedTransactions = useMemo(() => {
-    const sorted = [...transactions];
+    const sorted = [...filteredTransactions];
     sorted.sort((a, b) => {
       switch (sortOrder) {
         case 'date-desc': return b.date.localeCompare(a.date);
@@ -184,15 +226,25 @@ export default function Home() {
       }
     });
     return sorted;
-  }, [transactions, sortOrder]);
+  }, [filteredTransactions, sortOrder]);
 
-  // 月送り操作
   const prevMonth = () => setDisplayMonth(subMonths(displayMonth, 1));
   const nextMonth = () => setDisplayMonth(addMonths(displayMonth, 1));
 
+  // メンバーフィルタの切り替え処理
+  const toggleMember = (userId: string) => {
+    setSelectedMemberIds(prev => {
+      if (prev.includes(userId)) {
+        // 少なくとも1人は残す (または全員外すと0件になる)
+        return prev.filter(id => id !== userId);
+      } else {
+        return [...prev, userId];
+      }
+    });
+  };
+
   // --- レンダリング ---
   if (!user) {
-    // (ログイン画面: 変更なし)
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4">
         <Card className="w-full max-w-md shadow-xl border-0">
@@ -202,6 +254,20 @@ export default function Home() {
           </CardHeader>
           <CardContent>
             <form onSubmit={handleAuth} className="space-y-4">
+              {/* ★追加: 新規登録時のみ名前入力欄を表示 */}
+              {!isLoginMode && (
+                <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
+                  <label className="text-sm font-medium">お名前 (ニックネーム)</label>
+                  <Input 
+                    type="text" 
+                    required 
+                    placeholder="例: スロ吉"
+                    value={username} 
+                    onChange={e => setUsername(e.target.value)} 
+                    className="h-12 text-lg" 
+                  />
+                </div>
+              )}
               <div className="space-y-2">
                 <label className="text-sm font-medium">メールアドレス</label>
                 <Input type="email" required value={email} onChange={e => setEmail(e.target.value)} className="h-12 text-lg" />
@@ -274,11 +340,10 @@ export default function Home() {
 
         {currentHousehold && (
           <>
-            {/* ★トップカード: 月別収支 (履歴タブ以外で表示) */}
+            {/* ★トップカード (月別収支) */}
             {viewMode !== 'history' && (
               <Card className="bg-slate-900 text-white shadow-lg border-none overflow-hidden relative">
                 <CardContent className="p-4 sm:p-6">
-                  {/* 月切り替えヘッダー */}
                   <div className="flex justify-between items-center mb-2 relative z-10">
                     <Button variant="ghost" size="icon" onClick={prevMonth} className="h-8 w-8 text-slate-300 hover:text-white hover:bg-white/10">
                       <ChevronLeft className="w-5 h-5" />
@@ -314,7 +379,37 @@ export default function Home() {
               </Card>
             )}
 
-            {/* タブ切り替え (4つ) */}
+            {/* ★メンバー絞り込みフィルタ (UI) */}
+            {members.length > 1 && (
+              <div className="bg-white p-2 rounded-lg shadow-sm border border-slate-100 overflow-x-auto">
+                <div className="flex items-center gap-2 text-xs font-bold text-slate-500 mb-1 px-1">
+                  <Filter className="w-3 h-3" /> 表示対象:
+                </div>
+                <div className="flex gap-2">
+                  {members.map(member => {
+                    const isSelected = selectedMemberIds.includes(member.user_id);
+                    return (
+                      <button
+                        key={member.user_id}
+                        onClick={() => toggleMember(member.user_id)}
+                        className={`
+                          flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border
+                          ${isSelected 
+                            ? 'bg-blue-600 text-white border-blue-600 shadow-md' 
+                            : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'}
+                        `}
+                      >
+                        {/* チェックマーク */}
+                        <div className={`w-2 h-2 rounded-full ${isSelected ? 'bg-white' : 'bg-slate-300'}`} />
+                        {member.profiles?.username || '名無し'}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* タブ切り替え */}
             <div className="bg-slate-200 p-1 rounded-lg flex mb-4 overflow-x-auto">
               {[
                 { id: 'list', label: 'リスト', icon: List },
@@ -335,10 +430,9 @@ export default function Home() {
               ))}
             </div>
 
-            {/* コンテンツエリア */}
+            {/* コンテンツエリア (フィルタ済みデータを渡す) */}
             {viewMode === 'list' ? (
               <div className="pb-4">
-                {/* ★リスト用ソートコントロール */}
                 <div className="flex justify-end mb-2">
                   <div className="relative">
                     <ArrowUpDown className="absolute left-2 top-2.5 h-4 w-4 text-slate-500" />
@@ -359,9 +453,9 @@ export default function Home() {
                   <div className="space-y-2">
                      {[1,2,3].map(i => <div key={i} className="h-16 bg-slate-200 rounded-lg animate-pulse" />)}
                   </div>
-                ) : transactions.length === 0 ? (
+                ) : sortedTransactions.length === 0 ? (
                   <div className="text-center py-12 bg-white rounded-xl border border-dashed border-slate-300">
-                    <p className="text-slate-400 text-sm">記録を追加しましょう</p>
+                    <p className="text-slate-400 text-sm">表示するデータがありません</p>
                   </div>
                 ) : (
                   sortedTransactions.map((t) => (
@@ -374,18 +468,16 @@ export default function Home() {
                 )}
               </div>
             ) : viewMode === 'calendar' ? (
-              <CalendarView transactions={transactions} />
+              <CalendarView transactions={filteredTransactions} />
             ) : viewMode === 'analysis' ? (
-              <AnalysisView transactions={transactions} />
+              <AnalysisView transactions={filteredTransactions} />
             ) : (
-              // ★履歴ビュー (新規)
-              <HistoryView transactions={transactions} />
+              <HistoryView transactions={filteredTransactions} />
             )}
           </>
         )}
       </main>
 
-      {/* 設定モーダル等 */}
       <Dialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen}>
         <DialogContent className="max-w-[90%] rounded-xl">
           <DialogHeader>

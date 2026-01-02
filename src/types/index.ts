@@ -22,5 +22,18 @@ export type Transaction = {
   amount: number;
   type: 'income' | 'expense';
   memo?: string;
-  user_id: string; // 誰の記録か
+  user_id: string;
+  // ★追加: 紐づくユーザー情報 (結合して取得するため)
+  profiles?: {
+    username: string;
+  };
+};
+
+// ★追加: グループメンバー一覧用
+export type HouseholdMember = {
+  user_id: string;
+  profiles: {
+    username: string;
+  };
+  role: string;
 };

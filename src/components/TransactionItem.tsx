@@ -1,7 +1,7 @@
 import React from 'react';
 import { Transaction } from '@/types';
 import { Card } from '@/components/ui/card';
-import { Store, Gamepad2, CalendarDays } from 'lucide-react'; // アイコン追加
+import { Store, Gamepad2, User } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { ja } from 'date-fns/locale';
 
@@ -16,9 +16,11 @@ export const TransactionItem = ({ transaction, onClick }: Props) => {
   const balanceColor = isWin ? 'text-blue-600' : 'text-red-500';
   const balanceSign = isWin ? '+' : '';
 
-  // 日付フォーマット (例: 1/15(水))
   const dateObj = parseISO(transaction.date);
   const dateStr = format(dateObj, 'M/d(E)', { locale: ja });
+
+  // ユーザー名 (取得できない場合は未設定とする)
+  const userName = transaction.profiles?.username || '不明なユーザー';
 
   return (
     <Card 
@@ -27,12 +29,19 @@ export const TransactionItem = ({ transaction, onClick }: Props) => {
     >
       <div className="flex flex-col gap-1">
         
-        {/* 上段: 日付・機種名・収支 */}
-        <div className="flex justify-between items-center">
-          <div className="flex items-center gap-2 overflow-hidden">
-            {/* 日付バッジ */}
-            <div className="flex items-center text-xs font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded shrink-0">
-              {dateStr}
+        {/* 上段: 日付・ユーザー・機種名・収支 */}
+        <div className="flex justify-between items-start">
+          <div className="flex flex-col gap-1 overflow-hidden">
+            <div className="flex items-center gap-2 text-xs">
+               {/* 日付バッジ */}
+              <span className="font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
+                {dateStr}
+              </span>
+              {/* ★ユーザー名表示 */}
+              <div className="flex items-center text-slate-400">
+                <User className="w-3 h-3 mr-0.5" />
+                <span className="truncate max-w-[80px]">{userName}</span>
+              </div>
             </div>
             
             <div className="flex items-center gap-1 overflow-hidden">
@@ -42,7 +51,8 @@ export const TransactionItem = ({ transaction, onClick }: Props) => {
               </span>
             </div>
           </div>
-          <span className={`font-mono font-bold text-lg ${balanceColor} shrink-0 ml-2`}>
+
+          <span className={`font-mono font-bold text-lg ${balanceColor} shrink-0 ml-2 mt-1`}>
             {balanceSign}¥{fmt(transaction.amount)}
           </span>
         </div>
