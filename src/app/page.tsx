@@ -19,7 +19,7 @@ import { Switch } from '@/components/ui/switch';
 import { 
   LogOut, Users, Wallet, Settings, Trash2,
   Calendar as CalendarIcon, NotebookPen, PieChart, History,
-  ChevronLeft, ChevronRight, ArrowUpDown, Filter, Save, Lock, UserCircle, ArrowLeft
+  ChevronLeft, ChevronRight, ArrowUpDown, Filter, Save, Lock, UserCircle, ArrowLeft, X
 } from 'lucide-react';
 import { format, addMonths, subMonths, startOfMonth, endOfMonth, isWithinInterval, parseISO, startOfYear, endOfYear } from 'date-fns';
 import { ja } from 'date-fns/locale';
@@ -56,11 +56,13 @@ export default function Home() {
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   
   const [viewMode, setViewMode] = useState<'calendar' | 'list' | 'analysis' | 'history'>('calendar');
-  // ★追加: 表示範囲（月単位 or 年単位）
-  const [viewRange, setViewRange] = useState<'month' | 'year'>('month');
+  // ★変更: 'all' を追加（全期間表示用）
+  const [viewRange, setViewRange] = useState<'month' | 'year' | 'all'>('month');
   const [displayMonth, setDisplayMonth] = useState(new Date());
   
-  // ★変更: ソート項目の型拡張
+  // ★追加: フィルタリング条件（分析画面からのドリルダウン用）
+  const [filterCondition, setFilterCondition] = useState<{ type: 'shop' | 'machine' | null, value: string }>({ type: null, value: '' });
+  
   const [sortOrder, setSortOrder] = useState<'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc' | 'shop-asc' | 'machine-asc'>('date-desc');
 
   const [editGroupName, setEditGroupName] = useState('');
@@ -232,26 +234,38 @@ export default function Home() {
     return transactions.filter(t => selectedMemberIds.includes(t.user_id));
   }, [transactions, selectedMemberIds]);
 
-  // ★変更: viewRange（月単位/年単位）に応じてフィルタリング
+  // ★変更: フィルタリングロジックの強化 (期間 + 機種/店舗)
   const displayedTransactions = useMemo(() => {
-    let start, end;
-    if (viewRange === 'year') {
-      start = startOfYear(displayMonth);
-      end = endOfYear(displayMonth);
-    } else {
-      start = startOfMonth(displayMonth);
-      end = endOfMonth(displayMonth);
+    let filtered = filteredTransactions;
+
+    // 1. 期間フィルタ (viewRange === 'all' の場合は期間フィルタをスキップ)
+    if (viewRange !== 'all') {
+      let start, end;
+      if (viewRange === 'year') {
+        start = startOfYear(displayMonth);
+        end = endOfYear(displayMonth);
+      } else {
+        start = startOfMonth(displayMonth);
+        end = endOfMonth(displayMonth);
+      }
+      filtered = filtered.filter(t => t.date && isWithinInterval(parseISO(t.date), { start, end }));
     }
-    return filteredTransactions.filter(t => t.date && isWithinInterval(parseISO(t.date), { start, end }));
-  }, [filteredTransactions, displayMonth, viewRange]);
+
+    // 2. 機種・店舗フィルタ (filterCondition がある場合)
+    if (filterCondition.type === 'shop') {
+      filtered = filtered.filter(t => t.shop_name === filterCondition.value);
+    } else if (filterCondition.type === 'machine') {
+      filtered = filtered.filter(t => t.machine_name === filterCondition.value);
+    }
+
+    return filtered;
+  }, [filteredTransactions, displayMonth, viewRange, filterCondition]);
 
   const currentBalance = useMemo(() => {
     return displayedTransactions.reduce((sum, t) => sum + t.amount, 0);
   }, [displayedTransactions]);
 
-  // ★変更: ソート処理に店舗・機種を追加
   const sortedTransactions = useMemo(() => {
-    // リストモードのときは表示中の期間のデータのみ、それ以外（カレンダーなど）はフィルタ済み全データを使用
     const target = viewMode === 'list' ? displayedTransactions : filteredTransactions;
     const sorted = [...target];
     sorted.sort((a, b) => {
@@ -260,7 +274,6 @@ export default function Home() {
         case 'date-asc': return a.date.localeCompare(b.date);
         case 'amount-desc': return b.amount - a.amount;
         case 'amount-asc': return a.amount - b.amount;
-        // ★追加ソートロジック
         case 'shop-asc': return (a.shop_name || '').localeCompare(b.shop_name || '', 'ja');
         case 'machine-asc': return (a.machine_name || '').localeCompare(b.machine_name || '', 'ja');
         default: return 0;
@@ -269,9 +282,7 @@ export default function Home() {
     return sorted;
   }, [displayedTransactions, filteredTransactions, viewMode, sortOrder]);
 
-  // カレンダー用の月移動（カレンダーは常に月単位）
   const prevMonth = () => {
-    // リスト表示で年モードの場合は年移動、それ以外は月移動
     if (viewMode === 'list' && viewRange === 'year') {
       setDisplayMonth(subMonths(displayMonth, 12));
     } else {
@@ -291,9 +302,31 @@ export default function Home() {
   };
   const isOwner = currentHousehold?.owner_id === user?.id;
 
+  // フィルタ解除処理
+  const clearFilter = () => {
+    setFilterCondition({ type: null, value: '' });
+    if (viewRange === 'all') {
+      setViewRange('month'); // 通常モードに戻す
+    }
+  };
+
+  // ビューモード切替時の処理
+  const handleViewModeChange = (mode: any) => {
+    // 別のタブに切り替えるときはフィルタを解除する（使いやすさのため）
+    if (mode !== 'list' && filterCondition.type !== null) {
+      clearFilter();
+    }
+    
+    if (mode === 'calendar') {
+      setViewRange('month');
+    }
+    setViewMode(mode);
+  };
+
   if (!user) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4">
+        {/* ... (ログインフォームは変更なし) ... */}
         <Card className="w-full max-w-md shadow-xl border-0">
           <CardHeader>
             <CardTitle className="text-center text-2xl font-bold text-slate-800">Pachi-Money</CardTitle>
@@ -330,18 +363,10 @@ export default function Home() {
     );
   }
 
-  // 表示用日付フォーマット生成
   const getHeaderDateLabel = () => {
-    if (viewMode === 'list' && viewRange === 'year') {
-      return format(displayMonth, 'yyyy年', { locale: ja });
-    }
+    if (viewRange === 'all') return '全期間';
+    if (viewRange === 'year') return format(displayMonth, 'yyyy年', { locale: ja });
     return format(displayMonth, 'yyyy年 M月', { locale: ja });
-  };
-
-  // カレンダーモードに切り替えるときは強制的に月表示に戻す
-  const switchToCalendar = () => {
-    setViewMode('calendar');
-    setViewRange('month');
   };
 
   return (
@@ -383,6 +408,7 @@ export default function Home() {
       <main className="max-w-md mx-auto p-4 space-y-4">
         {households.length === 0 && (
           <div className="text-center py-20 px-4">
+             {/* ... (グループなし画面) ... */}
             <Wallet className="w-16 h-16 text-slate-300 mx-auto mb-4" />
             <p className="mb-6 text-slate-500 font-bold">まだ家計簿がありません</p>
             <Button onClick={createHousehold} className="w-full h-12 text-lg">最初のグループを作る</Button>
@@ -431,28 +457,40 @@ export default function Home() {
                         <ChevronRight className="w-4 h-4" />
                        </Button>
                     </div>
-                    {/* カレンダーモードは常に現在のmonthlyBalance (monthlyTransactionsで計算済み)を表示するのが適切だが、
-                        ここではソート用などに使っている displayedTransactions を使わず
-                        カレンダー用(常に月)の計算を行う。
-                    */}
+                    {/* カレンダーモード用の集計（フィルタに関わらず月単位） */}
                     <div className={`text-xl font-mono font-bold tracking-tight ${currentBalance >= 0 ? 'text-blue-600' : 'text-red-500'}`}>
                       {currentBalance >= 0 ? '+' : ''}{currentBalance.toLocaleString()}
                     </div>
                   </div>
-                  {/* カレンダーにはviewRangeの影響を受けないよう filteredTransactions を渡す */}
                   <CalendarView transactions={filteredTransactions} onSelectTransaction={openEditForm} />
                 </div>
               </div>
             ) : viewMode === 'list' ? (
               <div className="space-y-4">
-                <div className="flex items-center justify-between mb-2">
-                  <Button variant="outline" size="sm" onClick={() => setViewMode('history')} className="gap-1 h-8 text-xs">
-                    <ArrowLeft className="w-3 h-3" /> 履歴へ
-                  </Button>
-                  <span className="text-sm font-bold text-slate-500">
-                    {getHeaderDateLabel()}
-                    {viewRange === 'year' && ' (全記録)'}
-                  </span>
+                <div className="flex flex-col gap-2 mb-2">
+                  <div className="flex items-center justify-between">
+                    <Button variant="outline" size="sm" onClick={() => handleViewModeChange('history')} className="gap-1 h-8 text-xs">
+                      <ArrowLeft className="w-3 h-3" /> 履歴へ
+                    </Button>
+                    <span className="text-sm font-bold text-slate-500">
+                      {getHeaderDateLabel()}
+                    </span>
+                  </div>
+
+                  {/* ★追加: フィルタリング中の表示 */}
+                  {filterCondition.type && (
+                    <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-lg p-2 text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-blue-800">フィルタ中:</span>
+                        <span className="bg-white px-2 py-0.5 rounded border border-blue-100 text-blue-600 font-bold">
+                          {filterCondition.type === 'machine' ? '機種' : '店舗'}: {filterCondition.value}
+                        </span>
+                      </div>
+                      <Button variant="ghost" size="icon" className="h-6 w-6 text-blue-400 hover:text-blue-600 hover:bg-blue-100" onClick={clearFilter}>
+                        <X className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex justify-end mb-2">
@@ -467,7 +505,6 @@ export default function Home() {
                       <option value="date-asc">日付: 古い順</option>
                       <option value="amount-desc">収支: 勝ち額順</option>
                       <option value="amount-asc">収支: 負け額順</option>
-                      {/* ★追加 */}
                       <option value="shop-asc">店舗: 五十音順</option>
                       <option value="machine-asc">機種: 五十音順</option>
                     </select>
@@ -477,7 +514,7 @@ export default function Home() {
                   <div className="space-y-2">{[1,2,3].map(i => <div key={i} className="h-16 bg-slate-200 rounded-lg animate-pulse" />)}</div>
                 ) : sortedTransactions.length === 0 ? (
                   <div className="text-center py-12 bg-white rounded-xl border border-dashed border-slate-300">
-                    <p className="text-slate-400 text-sm">この期間のデータはありません</p>
+                    <p className="text-slate-400 text-sm">データがありません</p>
                   </div>
                 ) : (
                   sortedTransactions.map((t) => (
@@ -486,18 +523,30 @@ export default function Home() {
                 )}
               </div>
             ) : viewMode === 'analysis' ? (
-              <AnalysisView transactions={filteredTransactions} />
+              <AnalysisView 
+                transactions={filteredTransactions} 
+                onSelectMachine={(name) => {
+                  setFilterCondition({ type: 'machine', value: name });
+                  setViewRange('all'); // 全期間モードに切り替え
+                  setViewMode('list');
+                }}
+                onSelectShop={(name) => {
+                  setFilterCondition({ type: 'shop', value: name });
+                  setViewRange('all'); // 全期間モードに切り替え
+                  setViewMode('list');
+                }}
+              />
             ) : (
               <HistoryView 
                 transactions={filteredTransactions} 
                 onSelectMonth={(date) => {
                   setDisplayMonth(date);
-                  setViewRange('month'); // 月モード
+                  setViewRange('month'); 
                   setViewMode('list');
                 }}
                 onSelectYear={(date) => {
                   setDisplayMonth(date);
-                  setViewRange('year'); // 年モード
+                  setViewRange('year'); 
                   setViewMode('list');
                 }}
               />
@@ -519,10 +568,7 @@ export default function Home() {
                 ].map(tab => (
                   <button
                     key={tab.id}
-                    onClick={() => {
-                        if (tab.id === 'calendar') switchToCalendar();
-                        else setViewMode(tab.id as any);
-                    }}
+                    onClick={() => handleViewModeChange(tab.id)}
                     className={`
                       flex flex-col items-center justify-center w-full py-2 rounded-xl transition-all duration-200
                       ${viewMode === tab.id 
@@ -542,6 +588,7 @@ export default function Home() {
       </main>
 
       <Dialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen}>
+        {/* ... (設定モーダルは変更なし) ... */}
         <DialogContent className="max-w-[90%] rounded-xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>設定</DialogTitle>

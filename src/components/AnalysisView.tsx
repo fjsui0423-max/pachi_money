@@ -1,186 +1,207 @@
 "use client";
 
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo } from 'react';
 import { Transaction } from '@/types';
 import { 
   BarChart, Bar, XAxis, YAxis, Tooltip, 
-  LineChart, Line, CartesianGrid, ReferenceLine, Cell 
-} from 'recharts'; // ResponsiveContainer を削除
+  LineChart, Line, CartesianGrid, ReferenceLine, Cell, ResponsiveContainer 
+} from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { format, parseISO } from 'date-fns';
-import { Trophy, TrendingUp, BarChart3, Loader2 } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval, subMonths } from 'date-fns';
+import { ja } from 'date-fns/locale';
+import { Trophy, TrendingUp, BarChart3, Store, Gamepad2, ChevronRight, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 
 type Props = {
   transactions: Transaction[];
+  onSelectMachine: (name: string) => void;
+  onSelectShop: (name: string) => void;
 };
 
-export const AnalysisView = ({ transactions }: Props) => {
-  const [isMounted, setIsMounted] = useState(false);
+type AggregatedData = {
+  name: string;
+  amount: number;
+  count: number;
+  win: number;
+  lose: number;
+  draw: number;
+};
 
-  useEffect(() => {
-    setIsMounted(true);
-  }, []);
-
-  // 1. 月別データ集計
+export const AnalysisView = ({ transactions, onSelectMachine, onSelectShop }: Props) => {
+  // 月別収支 (直近12ヶ月)
   const monthlyData = useMemo(() => {
-    const map = new Map<string, number>();
-    transactions.forEach(t => {
-      if (!t.date) return;
-      const monthKey = t.date.substring(0, 7);
-      const current = map.get(monthKey) || 0;
-      map.set(monthKey, current + t.amount);
-    });
+    const end = endOfMonth(new Date());
+    const start = startOfMonth(subMonths(new Date(), 11));
+    const months = eachMonthOfInterval({ start, end });
 
-    return Array.from(map.entries())
-      .map(([date, amount]) => ({ date, amount }))
-      .sort((a, b) => a.date.localeCompare(b.date))
-      .map(d => ({
-        ...d,
-        label: format(parseISO(d.date + '-01'), 'M月'),
-        fill: d.amount >= 0 ? '#3b82f6' : '#ef4444',
-      }));
-  }, [transactions]);
-
-  // 2. 累積データ集計
-  const cumulativeData = useMemo(() => {
-    const sorted = [...transactions].sort((a, b) => a.date.localeCompare(b.date));
-    let total = 0;
-    return sorted.map(t => {
-      total += t.amount;
+    const data = months.map(month => {
+      const monthKey = format(month, 'yyyy-MM');
+      const monthTransactions = transactions.filter(t => t.date && t.date.startsWith(monthKey));
+      const balance = monthTransactions.reduce((sum, t) => sum + t.amount, 0);
       return {
-        date: t.date,
-        shortDate: format(parseISO(t.date), 'M/d'),
-        total,
+        name: format(month, 'M月', { locale: ja }),
+        fullDate: monthKey,
+        balance,
       };
     });
+    return data;
   }, [transactions]);
 
-  // 3. 機種別ランキング
-  const machineRanking = useMemo(() => {
-    const map = new Map<string, number>();
-    transactions.forEach(t => {
-      if (!t.machine_name) return;
-      const current = map.get(t.machine_name) || 0;
-      map.set(t.machine_name, current + t.amount);
+  // 資産推移
+  const assetData = useMemo(() => {
+    // 日付順にソート
+    const sorted = [...transactions].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    let current = 0;
+    const data: { date: string; amount: number }[] = [];
+    
+    sorted.forEach(t => {
+      current += t.amount;
+      data.push({
+        date: t.date,
+        amount: current
+      });
     });
     
-    return Array.from(map.entries())
-      .map(([name, amount]) => ({ name, amount }))
-      .sort((a, b) => b.amount - a.amount)
-      .slice(0, 5);
+    // データ点数が多すぎる場合は間引く（簡易的）
+    if (data.length > 50) {
+      return data.filter((_, i) => i === 0 || i === data.length - 1 || i % Math.ceil(data.length / 50) === 0);
+    }
+    return data;
   }, [transactions]);
 
-  const fmtK = (val: number) => (val / 1000).toFixed(0) + 'k';
+  // 集計関数
+  const aggregate = (key: 'machine_name' | 'shop_name'): AggregatedData[] => {
+    const map = new Map<string, AggregatedData>();
 
-  if (!isMounted) {
-    return (
-      <div className="flex justify-center py-20">
-        <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
-      </div>
-    );
-  }
+    transactions.forEach(t => {
+      const name = (key === 'machine_name' ? t.machine_name : t.shop_name) || '未設定';
+      const current = map.get(name) || { name, amount: 0, count: 0, win: 0, lose: 0, draw: 0 };
+      
+      current.amount += t.amount;
+      current.count += 1;
+      if (t.amount > 0) current.win += 1;
+      else if (t.amount < 0) current.lose += 1;
+      else current.draw += 1;
 
-  if (transactions.length === 0) {
-    return (
-      <div className="text-center py-20 bg-white rounded-xl border border-dashed border-slate-300 mx-4">
-        <p className="text-slate-500 font-bold">データがありません</p>
-      </div>
-    );
-  }
+      map.set(name, current);
+    });
+
+    return Array.from(map.values()).sort((a, b) => b.amount - a.amount);
+  };
+
+  const machineData = useMemo(() => aggregate('machine_name'), [transactions]);
+  const shopData = useMemo(() => aggregate('shop_name'), [transactions]);
 
   return (
-    <div className="space-y-6 pb-20">
-      
-      {/* 月別収支 */}
-      <Card className="shadow-sm">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-bold flex items-center gap-2 text-slate-700">
-            <BarChart3 className="w-4 h-4 text-blue-500" /> 月別収支
-          </CardTitle>
-        </CardHeader>
-        {/* スクロール可能にして、グラフ幅を固定(350px)にする */}
-        <CardContent className="p-2 overflow-x-auto">
-          <div className="min-w-[320px] flex justify-center">
-            <BarChart width={320} height={250} data={monthlyData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-              <XAxis dataKey="label" fontSize={12} tickLine={false} axisLine={false} />
-              <YAxis fontSize={11} tickLine={false} axisLine={false} tickFormatter={fmtK} width={35} />
-              <Tooltip 
-                cursor={{ fill: '#f1f5f9' }}
-                formatter={(val: any) => [`¥${val.toLocaleString()}`, '収支']}
-                contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
-              />
-              <ReferenceLine y={0} stroke="#94a3b8" />
-              <Bar dataKey="amount" radius={[4, 4, 0, 0]} isAnimationActive={false}>
-                {monthlyData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={entry.fill} />
-                ))}
-              </Bar>
-            </BarChart>
-          </div>
-        </CardContent>
-      </Card>
+    <div className="space-y-4 pb-24">
+      <Tabs defaultValue="trend" className="w-full">
+        <TabsList className="grid w-full grid-cols-3 mb-4">
+          <TabsTrigger value="trend"><BarChart3 className="w-4 h-4 mr-2" />推移</TabsTrigger>
+          <TabsTrigger value="machine"><Gamepad2 className="w-4 h-4 mr-2" />機種別</TabsTrigger>
+          <TabsTrigger value="shop"><Store className="w-4 h-4 mr-2" />店舗別</TabsTrigger>
+        </TabsList>
 
-      {/* 資産推移 */}
-      <Card className="shadow-sm">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-bold flex items-center gap-2 text-slate-700">
-            <TrendingUp className="w-4 h-4 text-green-500" /> 資産推移
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-2 overflow-x-auto">
-          <div className="min-w-[320px] flex justify-center">
-            <LineChart width={320} height={250} data={cumulativeData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-              <XAxis dataKey="shortDate" fontSize={11} tickLine={false} axisLine={false} minTickGap={30} />
-              <YAxis fontSize={11} tickLine={false} axisLine={false} tickFormatter={fmtK} width={35} />
-              <Tooltip 
-                formatter={(val: any) => [`¥${val.toLocaleString()}`, 'トータル']}
-                contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
-              />
-              <ReferenceLine y={0} stroke="#94a3b8" strokeDasharray="3 3" />
-              <Line 
-                type="monotone" 
-                dataKey="total" 
-                stroke="#10b981" 
-                strokeWidth={3} 
-                dot={false} 
-                activeDot={{ r: 6, strokeWidth: 0 }}
-                isAnimationActive={false}
-              />
-            </LineChart>
-          </div>
-        </CardContent>
-      </Card>
+        <TabsContent value="trend" className="space-y-6 animate-in fade-in zoom-in-95 duration-200">
+          {/* 月別収支グラフ */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-bold text-slate-500">月別収支 (直近1年)</CardTitle>
+            </CardHeader>
+            <CardContent className="h-[200px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={monthlyData}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="name" tick={{fontSize: 10}} axisLine={false} tickLine={false} />
+                  <YAxis hide />
+                  <Tooltip 
+                    cursor={{fill: '#f8fafc'}}
+                    contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}}
+                  />
+                  <ReferenceLine y={0} stroke="#cbd5e1" />
+                  <Bar dataKey="balance" radius={[4, 4, 0, 0]}>
+                    {monthlyData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.balance >= 0 ? '#3b82f6' : '#ef4444'} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
 
-      {/* 機種別ランキング */}
-      <Card className="shadow-sm">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-bold flex items-center gap-2 text-slate-700">
-            <Trophy className="w-4 h-4 text-amber-500" /> 勝ち機種ベスト5
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3 pt-2">
-          {machineRanking.length === 0 && <p className="text-xs text-slate-400">データ不足です</p>}
-          {machineRanking.map((item, idx) => (
-            <div key={item.name} className="flex items-center justify-between text-sm border-b border-slate-100 last:border-0 pb-2 last:pb-0">
-              <div className="flex items-center gap-3 overflow-hidden">
-                <span className={`
-                  w-6 h-6 flex items-center justify-center rounded-full text-[11px] font-bold shrink-0 shadow-sm
-                  ${idx === 0 ? 'bg-amber-100 text-amber-700' : idx === 1 ? 'bg-slate-200 text-slate-600' : idx === 2 ? 'bg-orange-100 text-orange-700' : 'bg-slate-50 text-slate-400'}
-                `}>
-                  {idx + 1}
-                </span>
-                <span className="truncate font-medium text-slate-700">{item.name}</span>
-              </div>
-              <span className={`font-mono font-bold ${item.amount >= 0 ? 'text-blue-600' : 'text-red-500'}`}>
-                {item.amount > 0 ? '+' : ''}{item.amount.toLocaleString()}
-              </span>
+          {/* 資産推移グラフ */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-bold text-slate-500">資産推移</CardTitle>
+            </CardHeader>
+            <CardContent className="h-[200px] w-full">
+               <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={assetData}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="date" tick={false} axisLine={false} tickLine={false} />
+                  <YAxis domain={['auto', 'auto']} hide />
+                  <Tooltip 
+                    labelFormatter={(label) => label}
+                    contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}}
+                  />
+                  <ReferenceLine y={0} stroke="#cbd5e1" strokeDasharray="3 3" />
+                  <Line type="monotone" dataKey="amount" stroke="#10b981" strokeWidth={2} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="machine" className="animate-in fade-in slide-in-from-right-4 duration-200">
+          <RankingList data={machineData} type="machine" onSelect={onSelectMachine} />
+        </TabsContent>
+
+        <TabsContent value="shop" className="animate-in fade-in slide-in-from-right-4 duration-200">
+          <RankingList data={shopData} type="shop" onSelect={onSelectShop} />
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+};
+
+// ランキングリスト用サブコンポーネント
+const RankingList = ({ data, type, onSelect }: { data: AggregatedData[], type: 'machine' | 'shop', onSelect: (name: string) => void }) => {
+  if (data.length === 0) return <div className="text-center py-10 text-slate-400">データがありません</div>;
+
+  return (
+    <div className="space-y-3">
+      {data.map((item, index) => (
+        <div 
+          key={index}
+          onClick={() => onSelect(item.name)}
+          className="bg-white p-3 rounded-xl border border-slate-100 shadow-sm flex items-center justify-between cursor-pointer hover:bg-slate-50 transition-all active:scale-[0.99]"
+        >
+          <div className="flex items-center gap-3 overflow-hidden">
+            <div className={`
+              flex items-center justify-center w-8 h-8 rounded-full font-bold text-xs shrink-0
+              ${index === 0 ? 'bg-yellow-100 text-yellow-700' : index === 1 ? 'bg-slate-100 text-slate-700' : index === 2 ? 'bg-orange-100 text-orange-800' : 'bg-slate-50 text-slate-500'}
+            `}>
+              {index + 1}
             </div>
-          ))}
-        </CardContent>
-      </Card>
-
+            <div className="min-w-0">
+              <p className="font-bold text-slate-800 truncate text-sm">{item.name}</p>
+              <div className="flex gap-2 text-[10px] text-slate-500 mt-0.5">
+                <span>{item.count}戦</span>
+                <span>{item.win}勝{item.lose}敗</span>
+                {item.count > 0 && <span>勝率{Math.round((item.win / item.count) * 100)}%</span>}
+              </div>
+            </div>
+          </div>
+          
+          <div className="text-right shrink-0">
+            <div className={`text-base font-mono font-bold ${item.amount >= 0 ? 'text-blue-600' : 'text-red-500'}`}>
+              {item.amount >= 0 ? '+' : ''}{item.amount.toLocaleString()}
+            </div>
+            <div className="text-[10px] text-slate-400 flex items-center justify-end gap-0.5">
+              詳細はリストへ <ChevronRight className="w-2.5 h-2.5" />
+            </div>
+          </div>
+        </div>
+      ))}
     </div>
   );
 };
