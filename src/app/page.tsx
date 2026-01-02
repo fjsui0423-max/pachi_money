@@ -21,7 +21,7 @@ import {
   Calendar as CalendarIcon, NotebookPen, PieChart, History,
   ChevronLeft, ChevronRight, ArrowUpDown, Filter, Save, Lock, UserCircle, ArrowLeft
 } from 'lucide-react';
-import { format, addMonths, subMonths, startOfMonth, endOfMonth, isWithinInterval, parseISO } from 'date-fns';
+import { format, addMonths, subMonths, startOfMonth, endOfMonth, isWithinInterval, parseISO, startOfYear, endOfYear } from 'date-fns';
 import { ja } from 'date-fns/locale';
 
 const AnalysisView = dynamic(
@@ -40,7 +40,6 @@ export default function Home() {
   const [isLoginMode, setIsLoginMode] = useState(true);
   const [authLoading, setAuthLoading] = useState(false);
 
-  // --- アカウント設定用 ---
   const [profile, setProfile] = useState<any>(null);
   const [editUsername, setEditUsername] = useState('');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
@@ -57,8 +56,12 @@ export default function Home() {
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   
   const [viewMode, setViewMode] = useState<'calendar' | 'list' | 'analysis' | 'history'>('calendar');
+  // ★追加: 表示範囲（月単位 or 年単位）
+  const [viewRange, setViewRange] = useState<'month' | 'year'>('month');
   const [displayMonth, setDisplayMonth] = useState(new Date());
-  const [sortOrder, setSortOrder] = useState<'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc'>('date-desc');
+  
+  // ★変更: ソート項目の型拡張
+  const [sortOrder, setSortOrder] = useState<'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc' | 'shop-asc' | 'machine-asc'>('date-desc');
 
   const [editGroupName, setEditGroupName] = useState('');
   const [isEditRestricted, setIsEditRestricted] = useState(false);
@@ -93,19 +96,9 @@ export default function Home() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-
-      const { data, error, status } = await supabase
-        .from('profiles')
-        .select('username, avatar_url')
-        .eq('id', user.id)
-        .single();
-
+      const { data, error, status } = await supabase.from('profiles').select('username, avatar_url').eq('id', user.id).single();
       if (error && status !== 406) throw error;
-      if (data) {
-        setProfile(data);
-        setEditUsername(data.username);
-        setAvatarUrl(data.avatar_url);
-      }
+      if (data) { setProfile(data); setEditUsername(data.username); setAvatarUrl(data.avatar_url); }
     } catch (error) { console.log('Error loading user data!'); }
   };
 
@@ -113,18 +106,9 @@ export default function Home() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('No user');
-
-      const updates = {
-        id: user.id,
-        username: editUsername,
-        avatar_url: avatarUrl,
-        updated_at: new Date(),
-      };
-
-      const { error } = await supabase.from('profiles').upsert(updates);
+      const { error } = await supabase.from('profiles').upsert({ id: user.id, username: editUsername, avatar_url: avatarUrl, updated_at: new Date() });
       if (error) throw error;
-      alert('プロフィールを更新しました！');
-      getProfile();
+      alert('プロフィールを更新しました！'); getProfile();
       if (currentHousehold) fetchTransactions(); 
     } catch (error) { alert('更新に失敗しました'); }
   };
@@ -134,16 +118,9 @@ export default function Home() {
     if (!pendingToken || !user) return;
     try {
       const { data, error } = await supabase.rpc('get_household_by_token', { lookup_token: pendingToken });
-      if (error || !data || data.length === 0) {
-        localStorage.removeItem('pendingInviteToken');
-        return;
-      }
+      if (error || !data || data.length === 0) { localStorage.removeItem('pendingInviteToken'); return; }
       const householdToJoin = data[0];
-      const { error: joinError } = await supabase.from('household_members').insert({
-          household_id: householdToJoin.id,
-          user_id: user.id,
-          role: 'member'
-        });
+      const { error: joinError } = await supabase.from('household_members').insert({ household_id: householdToJoin.id, user_id: user.id, role: 'member' });
       if (joinError && joinError.code !== '23505') throw joinError;
       localStorage.removeItem('pendingInviteToken');
       alert(`グループ「${householdToJoin.name}」に参加しました！`);
@@ -159,9 +136,7 @@ export default function Home() {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
       } else {
-        const { error } = await supabase.auth.signUp({ 
-          email, password, options: { data: { username: username || '名無し' } }
-        });
+        const { error } = await supabase.auth.signUp({ email, password, options: { data: { username: username || '名無し' } } });
         if (error) throw error;
         alert('登録完了！ログインします。');
       }
@@ -175,41 +150,25 @@ export default function Home() {
   };
 
   const fetchHouseholds = async (userId: string) => {
-    const { data: members } = await supabase
-      .from('household_members')
-      .select('household_id, households(id, name, invite_token, owner_id, is_edit_restricted)')
-      .eq('user_id', userId);
-
+    const { data: members } = await supabase.from('household_members').select('household_id, households(id, name, invite_token, owner_id, is_edit_restricted)').eq('user_id', userId);
     if (members && members.length > 0) {
       const list = members.map((m: any) => m.households) as Household[];
       setHouseholds(list);
-      setCurrentHousehold((prev) => {
-        if (!prev) return list[0];
-        const stillExists = list.find(h => h.id === prev.id);
-        return stillExists ? stillExists : list[0]; 
-      });
-    } else {
-      setHouseholds([]); setCurrentHousehold(null);
-    }
+      setCurrentHousehold(prev => prev ? list.find(h => h.id === prev.id) || list[0] : list[0]);
+    } else { setHouseholds([]); setCurrentHousehold(null); }
   };
 
   const fetchTransactions = async () => {
     if (!currentHousehold) return;
     setLoading(true);
-    const { data } = await supabase
-      .from('transactions')
-      .select('*, profiles(username, avatar_url)')
-      .eq('household_id', currentHousehold.id);
+    const { data } = await supabase.from('transactions').select('*, profiles(username, avatar_url)').eq('household_id', currentHousehold.id);
     if (data) setTransactions(data as Transaction[]);
     setLoading(false);
   };
   
   const fetchMembers = async () => {
     if (!currentHousehold) return;
-    const { data } = await supabase
-      .from('household_members')
-      .select('user_id, role, profiles(username)')
-      .eq('household_id', currentHousehold.id);
+    const { data } = await supabase.from('household_members').select('user_id, role, profiles(username)').eq('household_id', currentHousehold.id);
     if (data) {
       const mems = data as unknown as HouseholdMember[];
       setMembers(mems);
@@ -221,8 +180,7 @@ export default function Home() {
     const name = prompt("新しいグループ名を入力してください");
     if (!name || !user) return;
     try {
-      const { data: newHousehold, error: hError } = await supabase.from('households')
-        .insert({ name, owner_id: user.id, is_edit_restricted: false }).select().single(); 
+      const { data: newHousehold, error: hError } = await supabase.from('households').insert({ name, owner_id: user.id, is_edit_restricted: false }).select().single(); 
       if (hError) throw hError;
       await supabase.from('household_members').insert({ household_id: newHousehold.id, user_id: user.id });
       await fetchHouseholds(user.id);
@@ -232,30 +190,18 @@ export default function Home() {
   const updateHousehold = async () => {
     if (!currentHousehold || !user) return;
     const isOwner = currentHousehold.owner_id === user.id;
-    if (!isOwner && currentHousehold.is_edit_restricted) {
-      alert("オーナーの設定により、グループ名の変更は許可されていません。");
-      return;
-    }
+    if (!isOwner && currentHousehold.is_edit_restricted) { alert("オーナーの設定により、グループ名の変更は許可されていません。"); return; }
     try {
-      const { error } = await supabase
-        .from('households')
-        .update({ name: editGroupName, is_edit_restricted: isOwner ? isEditRestricted : currentHousehold.is_edit_restricted })
-        .eq('id', currentHousehold.id);
+      const { error } = await supabase.from('households').update({ name: editGroupName, is_edit_restricted: isOwner ? isEditRestricted : currentHousehold.is_edit_restricted }).eq('id', currentHousehold.id);
       if (error) throw error;
-      alert("設定を更新しました");
-      fetchHouseholds(user.id); 
-      setIsSettingsOpen(false);
+      alert("設定を更新しました"); fetchHouseholds(user.id); setIsSettingsOpen(false);
     } catch (err) { alert("更新に失敗しました"); }
   };
 
   const deleteHousehold = async () => {
     if (!currentHousehold || !user) return;
-    if (currentHousehold.owner_id !== user.id) {
-      alert("削除できるのは作成者のみです。");
-      return;
-    }
+    if (currentHousehold.owner_id !== user.id) { alert("削除できるのは作成者のみです。"); return; }
     if (!confirm(`本当に「${currentHousehold.name}」を削除しますか？`)) return;
-
     try {
       setLoading(true);
       const { data: members } = await supabase.from('household_members').select('user_id').eq('household_id', currentHousehold.id).neq('user_id', user.id);
@@ -268,9 +214,7 @@ export default function Home() {
           }
         }
       }
-      await supabase.from('households').delete().eq('id', currentHousehold.id);
-      setIsSettingsOpen(false);
-      fetchHouseholds(user.id); 
+      await supabase.from('households').delete().eq('id', currentHousehold.id); setIsSettingsOpen(false); fetchHouseholds(user.id); 
     } catch (err) { alert('削除失敗'); } finally { setLoading(false); }
   };
 
@@ -280,8 +224,7 @@ export default function Home() {
   const copyInviteLink = () => {
     if (!currentHousehold?.invite_token) return;
     const url = `${window.location.origin}/invite/${currentHousehold.invite_token}`;
-    navigator.clipboard.writeText(url);
-    alert('招待URLをコピーしました！');
+    navigator.clipboard.writeText(url); alert('招待URLをコピーしました！');
   };
 
   const filteredTransactions = useMemo(() => {
@@ -289,18 +232,27 @@ export default function Home() {
     return transactions.filter(t => selectedMemberIds.includes(t.user_id));
   }, [transactions, selectedMemberIds]);
 
-  const monthlyTransactions = useMemo(() => {
-    const start = startOfMonth(displayMonth);
-    const end = endOfMonth(displayMonth);
+  // ★変更: viewRange（月単位/年単位）に応じてフィルタリング
+  const displayedTransactions = useMemo(() => {
+    let start, end;
+    if (viewRange === 'year') {
+      start = startOfYear(displayMonth);
+      end = endOfYear(displayMonth);
+    } else {
+      start = startOfMonth(displayMonth);
+      end = endOfMonth(displayMonth);
+    }
     return filteredTransactions.filter(t => t.date && isWithinInterval(parseISO(t.date), { start, end }));
-  }, [filteredTransactions, displayMonth]);
+  }, [filteredTransactions, displayMonth, viewRange]);
 
-  const monthlyBalance = useMemo(() => {
-    return monthlyTransactions.reduce((sum, t) => sum + t.amount, 0);
-  }, [monthlyTransactions]);
+  const currentBalance = useMemo(() => {
+    return displayedTransactions.reduce((sum, t) => sum + t.amount, 0);
+  }, [displayedTransactions]);
 
+  // ★変更: ソート処理に店舗・機種を追加
   const sortedTransactions = useMemo(() => {
-    const target = viewMode === 'list' ? monthlyTransactions : filteredTransactions;
+    // リストモードのときは表示中の期間のデータのみ、それ以外（カレンダーなど）はフィルタ済み全データを使用
+    const target = viewMode === 'list' ? displayedTransactions : filteredTransactions;
     const sorted = [...target];
     sorted.sort((a, b) => {
       switch (sortOrder) {
@@ -308,14 +260,32 @@ export default function Home() {
         case 'date-asc': return a.date.localeCompare(b.date);
         case 'amount-desc': return b.amount - a.amount;
         case 'amount-asc': return a.amount - b.amount;
+        // ★追加ソートロジック
+        case 'shop-asc': return (a.shop_name || '').localeCompare(b.shop_name || '', 'ja');
+        case 'machine-asc': return (a.machine_name || '').localeCompare(b.machine_name || '', 'ja');
         default: return 0;
       }
     });
     return sorted;
-  }, [monthlyTransactions, filteredTransactions, viewMode, sortOrder]);
+  }, [displayedTransactions, filteredTransactions, viewMode, sortOrder]);
 
-  const prevMonth = () => setDisplayMonth(subMonths(displayMonth, 1));
-  const nextMonth = () => setDisplayMonth(addMonths(displayMonth, 1));
+  // カレンダー用の月移動（カレンダーは常に月単位）
+  const prevMonth = () => {
+    // リスト表示で年モードの場合は年移動、それ以外は月移動
+    if (viewMode === 'list' && viewRange === 'year') {
+      setDisplayMonth(subMonths(displayMonth, 12));
+    } else {
+      setDisplayMonth(subMonths(displayMonth, 1));
+    }
+  };
+  const nextMonth = () => {
+    if (viewMode === 'list' && viewRange === 'year') {
+      setDisplayMonth(addMonths(displayMonth, 12));
+    } else {
+      setDisplayMonth(addMonths(displayMonth, 1));
+    }
+  };
+
   const toggleMember = (userId: string) => {
     setSelectedMemberIds(prev => prev.includes(userId) ? prev.filter(id => id !== userId) : [...prev, userId]);
   };
@@ -359,6 +329,20 @@ export default function Home() {
       </div>
     );
   }
+
+  // 表示用日付フォーマット生成
+  const getHeaderDateLabel = () => {
+    if (viewMode === 'list' && viewRange === 'year') {
+      return format(displayMonth, 'yyyy年', { locale: ja });
+    }
+    return format(displayMonth, 'yyyy年 M月', { locale: ja });
+  };
+
+  // カレンダーモードに切り替えるときは強制的に月表示に戻す
+  const switchToCalendar = () => {
+    setViewMode('calendar');
+    setViewRange('month');
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 pb-32 safe-area-padding">
@@ -408,7 +392,6 @@ export default function Home() {
 
         {currentHousehold && (
           <>
-            {/* ★変更: メンバーフィルタをコンパクト化 */}
             {members.length > 1 && (
               <div className="bg-white px-3 py-2 rounded-lg shadow-sm border border-slate-100 flex items-center gap-3 overflow-hidden">
                 <Filter className="w-3 h-3 text-slate-400 shrink-0" />
@@ -436,23 +419,27 @@ export default function Home() {
             {viewMode === 'calendar' ? (
               <div className="space-y-4">
                 <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                  {/* ★変更: カレンダーヘッダーをコンパクトな横並びに */}
                   <div className="bg-slate-50/50 border-b border-slate-100 px-3 py-2 flex justify-between items-center">
                     <div className="flex items-center gap-1">
                        <Button variant="ghost" size="icon" onClick={prevMonth} className="h-7 w-7 text-slate-400 hover:text-slate-600">
                         <ChevronLeft className="w-4 h-4" />
                        </Button>
                        <span className="font-bold text-slate-700 text-base">
-                         {format(displayMonth, 'yyyy年 M月', { locale: ja })}
+                         {getHeaderDateLabel()}
                        </span>
                        <Button variant="ghost" size="icon" onClick={nextMonth} className="h-7 w-7 text-slate-400 hover:text-slate-600">
                         <ChevronRight className="w-4 h-4" />
                        </Button>
                     </div>
-                    <div className={`text-xl font-mono font-bold tracking-tight ${monthlyBalance >= 0 ? 'text-blue-600' : 'text-red-500'}`}>
-                      {monthlyBalance >= 0 ? '+' : ''}{monthlyBalance.toLocaleString()}
+                    {/* カレンダーモードは常に現在のmonthlyBalance (monthlyTransactionsで計算済み)を表示するのが適切だが、
+                        ここではソート用などに使っている displayedTransactions を使わず
+                        カレンダー用(常に月)の計算を行う。
+                    */}
+                    <div className={`text-xl font-mono font-bold tracking-tight ${currentBalance >= 0 ? 'text-blue-600' : 'text-red-500'}`}>
+                      {currentBalance >= 0 ? '+' : ''}{currentBalance.toLocaleString()}
                     </div>
                   </div>
+                  {/* カレンダーにはviewRangeの影響を受けないよう filteredTransactions を渡す */}
                   <CalendarView transactions={filteredTransactions} onSelectTransaction={openEditForm} />
                 </div>
               </div>
@@ -463,7 +450,8 @@ export default function Home() {
                     <ArrowLeft className="w-3 h-3" /> 履歴へ
                   </Button>
                   <span className="text-sm font-bold text-slate-500">
-                    {format(displayMonth, 'yyyy年 M月', { locale: ja })}
+                    {getHeaderDateLabel()}
+                    {viewRange === 'year' && ' (全記録)'}
                   </span>
                 </div>
 
@@ -479,6 +467,9 @@ export default function Home() {
                       <option value="date-asc">日付: 古い順</option>
                       <option value="amount-desc">収支: 勝ち額順</option>
                       <option value="amount-asc">収支: 負け額順</option>
+                      {/* ★追加 */}
+                      <option value="shop-asc">店舗: 五十音順</option>
+                      <option value="machine-asc">機種: 五十音順</option>
                     </select>
                   </div>
                 </div>
@@ -486,7 +477,7 @@ export default function Home() {
                   <div className="space-y-2">{[1,2,3].map(i => <div key={i} className="h-16 bg-slate-200 rounded-lg animate-pulse" />)}</div>
                 ) : sortedTransactions.length === 0 ? (
                   <div className="text-center py-12 bg-white rounded-xl border border-dashed border-slate-300">
-                    <p className="text-slate-400 text-sm">この月のデータはありません</p>
+                    <p className="text-slate-400 text-sm">この期間のデータはありません</p>
                   </div>
                 ) : (
                   sortedTransactions.map((t) => (
@@ -501,6 +492,12 @@ export default function Home() {
                 transactions={filteredTransactions} 
                 onSelectMonth={(date) => {
                   setDisplayMonth(date);
+                  setViewRange('month'); // 月モード
+                  setViewMode('list');
+                }}
+                onSelectYear={(date) => {
+                  setDisplayMonth(date);
+                  setViewRange('year'); // 年モード
                   setViewMode('list');
                 }}
               />
@@ -522,7 +519,10 @@ export default function Home() {
                 ].map(tab => (
                   <button
                     key={tab.id}
-                    onClick={() => setViewMode(tab.id as any)}
+                    onClick={() => {
+                        if (tab.id === 'calendar') switchToCalendar();
+                        else setViewMode(tab.id as any);
+                    }}
                     className={`
                       flex flex-col items-center justify-center w-full py-2 rounded-xl transition-all duration-200
                       ${viewMode === tab.id 

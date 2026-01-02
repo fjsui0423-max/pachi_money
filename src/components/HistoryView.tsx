@@ -2,16 +2,17 @@ import React, { useMemo, useState } from 'react';
 import { Transaction } from '@/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Trophy, TrendingUp, TrendingDown, ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
+import { Trophy, TrendingUp, TrendingDown, ChevronLeft, ChevronRight, Calendar, List } from 'lucide-react';
 import { format } from 'date-fns';
 import { ja } from 'date-fns/locale';
 
 type Props = {
   transactions: Transaction[];
-  onSelectMonth: (date: Date) => void; // 月が選択されたときのコールバック
+  onSelectMonth: (date: Date) => void; // 月単位のリストへ
+  onSelectYear: (date: Date) => void;  // ★追加: 年単位のリストへ
 };
 
-export const HistoryView = ({ transactions, onSelectMonth }: Props) => {
+export const HistoryView = ({ transactions, onSelectMonth, onSelectYear }: Props) => {
   // 表示モード: 'year' = 年一覧, 'month' = 特定の年の月一覧
   const [viewLevel, setViewLevel] = useState<'year' | 'month'>('year');
   const [selectedYear, setSelectedYear] = useState<string>('');
@@ -42,7 +43,11 @@ export const HistoryView = ({ transactions, onSelectMonth }: Props) => {
 
     return Array.from(map.entries())
       .sort((a, b) => b[0].localeCompare(a[0])) // 新しい年順
-      .map(([year, amount]) => ({ year, amount }));
+      .map(([year, amount]) => ({ 
+        year, 
+        amount,
+        dateObj: new Date(parseInt(year), 0, 1) // その年の1月1日
+      }));
   }, [transactions]);
 
   // 選択された年の月別データ集計
@@ -69,7 +74,7 @@ export const HistoryView = ({ transactions, onSelectMonth }: Props) => {
       }));
   }, [transactions, selectedYear]);
 
-  // 年を選択したときの処理
+  // 年を選択したときの処理（月一覧へドリルダウン）
   const handleYearClick = (year: string) => {
     setSelectedYear(year);
     setViewLevel('month');
@@ -86,16 +91,18 @@ export const HistoryView = ({ transactions, onSelectMonth }: Props) => {
       
       {/* ナビゲーションヘッダー（月選択時のみ表示） */}
       {viewLevel === 'month' && (
-        <div className="flex items-center gap-2 mb-2">
-          <Button variant="ghost" size="sm" onClick={handleBackToYear} className="gap-1 pl-0 text-slate-500 hover:text-slate-800">
-            <ChevronLeft className="w-5 h-5" />
-            <span className="font-bold">{selectedYear}年</span>
-          </Button>
-          <span className="text-sm text-slate-400">の月別アーカイブ</span>
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={handleBackToYear} className="gap-1 pl-0 text-slate-500 hover:text-slate-800">
+              <ChevronLeft className="w-5 h-5" />
+              <span className="font-bold">{selectedYear}年</span>
+            </Button>
+            <span className="text-sm text-slate-400">の月別アーカイブ</span>
+          </div>
         </div>
       )}
 
-      {/* 生涯収支カード (年一覧のときのみ表示して、画面をすっきりさせる) */}
+      {/* 生涯収支カード (年一覧のときのみ表示) */}
       {viewLevel === 'year' && (
         <Card className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border-none shadow-lg mb-6">
           <CardHeader className="pb-2">
@@ -134,18 +141,40 @@ export const HistoryView = ({ transactions, onSelectMonth }: Props) => {
             {yearlyData.map((item) => (
               <div 
                 key={item.year} 
-                onClick={() => handleYearClick(item.year)}
-                className="bg-white p-4 rounded-lg border border-slate-100 flex justify-between items-center shadow-sm cursor-pointer hover:bg-slate-50 transition-colors active:scale-[0.99]"
+                className="bg-white p-3 rounded-lg border border-slate-100 flex justify-between items-center shadow-sm hover:bg-slate-50 transition-colors"
               >
-                <div className="flex items-center gap-2">
-                  <Calendar className="w-4 h-4 text-slate-400" />
-                  <span className="font-bold text-slate-700">{item.year}年</span>
-                </div>
-                <div className="flex items-center gap-2">
+                {/* 左側クリックでドリルダウン */}
+                <div 
+                  className="flex-1 flex items-center justify-between cursor-pointer mr-2"
+                  onClick={() => handleYearClick(item.year)}
+                >
+                  <div className="flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-slate-400" />
+                    <span className="font-bold text-slate-700">{item.year}年</span>
+                  </div>
                   <span className={`font-mono font-bold ${item.amount >= 0 ? 'text-blue-600' : 'text-red-500'}`}>
                     {item.amount >= 0 ? '+' : ''}{item.amount.toLocaleString()}
                   </span>
-                  <ChevronRight className="w-4 h-4 text-slate-300" />
+                </div>
+
+                {/* 右側ボタンでその年の全記録リストへ */}
+                <Button 
+                  variant="outline" 
+                  size="icon" 
+                  className="h-8 w-8 shrink-0 text-slate-400"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSelectYear(item.dateObj);
+                  }}
+                >
+                  <List className="w-4 h-4" />
+                </Button>
+                
+                <div 
+                  className="ml-2 cursor-pointer" 
+                  onClick={() => handleYearClick(item.year)}
+                >
+                   <ChevronRight className="w-4 h-4 text-slate-300" />
                 </div>
               </div>
             ))}
