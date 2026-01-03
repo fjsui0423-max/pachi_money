@@ -117,13 +117,7 @@ export default function InvitePage() {
             {user ? 'このグループに参加する' : 'ログイン・登録して参加'}
           </Button>
           
-          {!user && (
-            <div className="text-xs text-slate-500 bg-slate-50 p-3 rounded text-left space-y-1">
-              <p>📌 <strong>手順:</strong></p>
-              <p>1. 上のボタンを押して、アカウントを作成（またはログイン）してください。</p>
-              <p>2. 登録が完了すると、自動的にこのグループに追加されます。</p>
-            </div>
-          )}
+          
         </CardContent>
       </Card>
     </div>
