@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo } from 'react';
+import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { Household, Transaction, HouseholdMember } from '@/types';
 import { TransactionItem } from '@/components/TransactionItem';
@@ -355,43 +356,95 @@ export default function Home() {
 
   if (!user) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4">
-        <Card className="w-full max-w-md shadow-xl border-0">
-          <CardHeader>
-            <CardTitle className="text-center text-2xl font-bold text-slate-800">Pachi-Money</CardTitle>
-            <p className="text-center text-sm text-slate-500">パチスロ・投資収支 共有アプリ</p>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleAuth} className="space-y-4">
-              {!isLoginMode && (
-                <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
-                  <label className="text-sm font-medium">お名前 (ニックネーム)</label>
-                  <Input type="text" required placeholder="例: スロ吉" value={username} onChange={e => setUsername(e.target.value)} className="h-12 text-lg" />
+      <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 safe-area-padding">
+        {/* ヘッダー */}
+        <header className="px-6 py-4 flex items-center justify-between max-w-5xl mx-auto w-full">
+          <div className="flex items-center gap-2 font-bold text-xl text-slate-800">
+            <Wallet className="w-6 h-6 text-blue-600" />
+            Pachi-Money
+          </div>
+        </header>
+
+        <main className="max-w-5xl mx-auto px-4 py-8 lg:py-16 w-full">
+          <div className="grid lg:grid-cols-2 gap-12 items-center">
+            
+            {/* 左側（スマホでは上）：アプリ紹介テキスト */}
+            <div className="space-y-6 text-center lg:text-left">
+              <h1 className="text-3xl lg:text-5xl font-extrabold text-slate-900 tracking-tight leading-tight">
+                パチンコ・パチスロ収支を<br className="hidden lg:block" />
+                <span className="text-blue-600">もっとスマートに管理。</span>
+              </h1>
+              <p className="text-slate-600 text-lg leading-relaxed">
+                Pachi-Moneyは、日々の収支を簡単に記録・分析できる完全無料のクラウド家計簿アプリです。<br />
+                友人やパートナーとの「グループ共有」機能で、収支を楽しく可視化しましょう。
+              </p>
+              
+              {/* 機能紹介アイコン */}
+              <div className="grid grid-cols-3 gap-4 pt-4">
+                <div className="flex flex-col items-center gap-2 p-3 bg-white rounded-lg shadow-sm border border-slate-100">
+                  <CalendarIcon className="w-6 h-6 text-blue-500" />
+                  <span className="text-xs font-bold text-slate-600">カレンダー</span>
                 </div>
-              )}
-              <div className="space-y-2">
-                <label className="text-sm font-medium">メールアドレス</label>
-                <Input type="email" required value={email} onChange={e => setEmail(e.target.value)} className="h-12 text-lg" />
+                <div className="flex flex-col items-center gap-2 p-3 bg-white rounded-lg shadow-sm border border-slate-100">
+                  <PieChart className="w-6 h-6 text-emerald-500" />
+                  <span className="text-xs font-bold text-slate-600">分析グラフ</span>
+                </div>
+                <div className="flex flex-col items-center gap-2 p-3 bg-white rounded-lg shadow-sm border border-slate-100">
+                  <Users className="w-6 h-6 text-indigo-500" />
+                  <span className="text-xs font-bold text-slate-600">グループ共有</span>
+                </div>
               </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">パスワード</label>
-                <Input type="password" required value={password} onChange={e => setPassword(e.target.value)} className="h-12 text-lg" />
-              </div>
-              <Button type="submit" className="w-full h-12 text-lg font-bold" disabled={authLoading}>
-                {authLoading ? '処理中...' : (isLoginMode ? 'ログイン' : '新規登録')}
-              </Button>
-            </form>
-            <div className="mt-6 text-center">
-              <button onClick={() => setIsLoginMode(!isLoginMode)} className="text-sm text-blue-600 hover:underline p-2">
-                {isLoginMode ? 'アカウント作成はこちら' : 'ログインはこちら'}
-              </button>
             </div>
-          </CardContent>
-        </Card>
+
+            {/* 右側（スマホでは下）：ログインフォーム */}
+            <div className="w-full max-w-md mx-auto">
+              <Card className="shadow-2xl border-0 bg-white/80 backdrop-blur">
+                <CardHeader>
+                  <CardTitle className="text-center text-xl font-bold text-slate-800">
+                    {isLoginMode ? 'ログインして始める' : 'アカウント作成'}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <form onSubmit={handleAuth} className="space-y-4">
+                    {!isLoginMode && (
+                      <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
+                        <label className="text-sm font-medium">お名前 (ニックネーム)</label>
+                        <Input type="text" required placeholder="例: スロ吉" value={username} onChange={e => setUsername(e.target.value)} className="h-11" />
+                      </div>
+                    )}
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">メールアドレス</label>
+                      <Input type="email" required value={email} onChange={e => setEmail(e.target.value)} className="h-11" />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">パスワード</label>
+                      <Input type="password" required value={password} onChange={e => setPassword(e.target.value)} className="h-11" />
+                    </div>
+                    <Button type="submit" className="w-full h-11 text-lg font-bold shadow-lg shadow-blue-200" disabled={authLoading}>
+                      {authLoading ? '処理中...' : (isLoginMode ? 'ログイン' : '無料で登録')}
+                    </Button>
+                  </form>
+                  <div className="mt-6 text-center">
+                    <button onClick={() => setIsLoginMode(!isLoginMode)} className="text-sm text-blue-600 hover:underline p-2 font-medium">
+                      {isLoginMode ? 'はじめての方はこちら（新規登録）' : 'すでにアカウントをお持ちの方'}
+                    </button>
+                  </div>
+                </CardContent>
+              </Card>
+              <p className="text-center text-xs text-slate-400 mt-4">
+                登録することで、
+                <Link href="/terms" className="underline hover:text-slate-600">利用規約</Link>
+                と
+                <Link href="/privacy" className="underline hover:text-slate-600">プライバシーポリシー</Link>
+                に同意したものとみなされます。
+              </p>
+            </div>
+
+          </div>
+        </main>
       </div>
     );
   }
-
   const getHeaderDateLabel = () => {
     if (viewRange === 'all') return '全期間';
     if (viewRange === 'year') return format(displayMonth, 'yyyy年', { locale: ja });
