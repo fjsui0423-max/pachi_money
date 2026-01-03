@@ -1,20 +1,15 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
+import Script from "next/script";
+import { Footer } from "@/components/Footer";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+// この行が抜けておりました
+const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "パチマネー - 収支管理アプリ", // ブラウザのタブや共有時に表示されるタイトル
-  description: "パチンコ・スロットの収支を簡単に記録・分析できるアプリです", // 共有時の説明文
+  title: "Pachi-Money | パチスロ収支共有・分析アプリ",
+  description: "パチスロや投資の収支をグループで共有・分析できる無料の家計簿アプリ。グラフ分析やカレンダー機能で収支管理をサポートします。",
 };
 
 export default function RootLayout({
@@ -23,11 +18,23 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
-        {children}
+    <html lang="ja">
+      <head>
+        {/* AdSense審査用コード (XXXXXXXXXXは実際のIDに置き換えてください) */}
+        <Script
+          async
+          src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-XXXXXXXXXXXXXXXX"
+          crossOrigin="anonymous"
+          strategy="afterInteractive"
+        />
+      </head>
+      <body className={inter.className}>
+        <div className="min-h-screen flex flex-col">
+          <div className="flex-1">
+            {children}
+          </div>
+          <Footer />
+        </div>
       </body>
     </html>
   );
