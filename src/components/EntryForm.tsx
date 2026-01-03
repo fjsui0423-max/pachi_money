@@ -11,6 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { MasterListSelector } from './MasterListSelector';
 import { SelectionButton } from '@/components/SelectionButton';
+import { format } from 'date-fns'; // ▼ 追加: 日付フォーマット用
 
 type Props = {
   isOpen: boolean;
@@ -18,9 +19,10 @@ type Props = {
   onSuccess: () => void;
   householdId?: string;
   initialData?: Transaction | null;
+  defaultDate?: Date; // ▼ 追加: 新規作成時の初期日付
 };
 
-export const EntryForm = ({ isOpen, onClose, onSuccess, householdId, initialData }: Props) => {
+export const EntryForm = ({ isOpen, onClose, onSuccess, householdId, initialData, defaultDate }: Props) => {
   const [isLoading, setIsLoading] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -37,6 +39,7 @@ export const EntryForm = ({ isOpen, onClose, onSuccess, householdId, initialData
   useEffect(() => {
     if (isOpen) {
       if (initialData) {
+        // 編集モード
         setDate(initialData.date);
         setShopName(initialData.shop_name);
         setMachineName(initialData.machine_name);
@@ -44,7 +47,11 @@ export const EntryForm = ({ isOpen, onClose, onSuccess, householdId, initialData
         setRecovery(initialData.recovery.toString());
         setMemo(initialData.memo || '');
       } else {
-        setDate(new Date().toISOString().split('T')[0]);
+        // 新規作成モード
+        // ▼ 修正: defaultDateがあればそれを、なければ今日を設定
+        const targetDate = defaultDate || new Date();
+        setDate(format(targetDate, 'yyyy-MM-dd'));
+        
         setShopName('');
         setMachineName('');
         setInvestment('');
@@ -52,7 +59,7 @@ export const EntryForm = ({ isOpen, onClose, onSuccess, householdId, initialData
         setMemo('');
       }
     }
-  }, [isOpen, initialData, householdId]);
+  }, [isOpen, initialData, householdId, defaultDate]); // defaultDateを依存配列に追加
 
   const addAmount = (currentValue: string, setter: (val: string) => void, amount: number) => {
     const current = parseInt(currentValue || '0', 10);
@@ -124,7 +131,6 @@ export const EntryForm = ({ isOpen, onClose, onSuccess, householdId, initialData
   return (
     <>
       <Dialog open={isOpen} onOpenChange={onClose}>
-        {/* ▼ 修正: w-[95%] rounded-xl overflow-x-hidden を追加し、横スクロールを防止 */}
         <DialogContent className="max-w-md w-[95%] rounded-xl max-h-[90vh] overflow-y-auto overflow-x-hidden">
           <DialogHeader>
             <DialogTitle>{initialData ? '記録の編集' : '新規記録'}</DialogTitle>

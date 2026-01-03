@@ -18,14 +18,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'; 
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { 
   LogOut, Users, Wallet, Settings, Trash2,
   Calendar as CalendarIcon, NotebookPen, PieChart, History,
   ChevronLeft, ChevronRight, ArrowUpDown, Filter, Save, Lock, UserCircle, ArrowLeft, X,
-  DoorOpen, Mail, UserX, FileUp, Copy, Star // ▼ 追加: Starアイコン
+  DoorOpen, Mail, UserX, FileUp, Copy, Star
 } from 'lucide-react';
-import { format, addMonths, subMonths, startOfMonth, endOfMonth, isWithinInterval, parseISO, startOfYear, endOfYear, getYear } from 'date-fns';
+import { format, addMonths, subMonths, startOfMonth, endOfMonth, isWithinInterval, parseISO, startOfYear, endOfYear, getYear, isSameMonth } from 'date-fns';
 import { ja } from 'date-fns/locale';
 
 const AnalysisView = dynamic(
@@ -36,7 +36,7 @@ const AnalysisView = dynamic(
   }
 );
 
-// Household型を拡張して is_default を持てるようにする
+// Household型を拡張
 type ExtendedHousehold = Household & { is_default?: boolean };
 
 export default function Home() {
@@ -53,10 +53,8 @@ export default function Home() {
   const [editUsername, setEditUsername] = useState('');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
-  // ▼ 型を変更
   const [households, setHouseholds] = useState<ExtendedHousehold[]>([]);
   const [currentHousehold, setCurrentHousehold] = useState<ExtendedHousehold | null>(null);
-  
   const [members, setMembers] = useState<HouseholdMember[]>([]);
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -65,6 +63,7 @@ export default function Home() {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
+  const [newEntryDate, setNewEntryDate] = useState<Date | undefined>(undefined);
   
   const [viewMode, setViewMode] = useState<'calendar' | 'list' | 'analysis' | 'history'>('calendar');
   const [viewRange, setViewRange] = useState<'month' | 'year' | 'all'>('month');
@@ -83,6 +82,7 @@ export default function Home() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // データコピー設定用ステート
   const [copyTargetHouseholdId, setCopyTargetHouseholdId] = useState<string>('');
   const [copyRange, setCopyRange] = useState<'all' | 'year' | 'month'>('all');
   const [copyYear, setCopyYear] = useState<string>(new Date().getFullYear().toString());
@@ -106,6 +106,7 @@ export default function Home() {
     }
   }, [user]);
 
+  // コピー用の年リスト生成
   const availableYearsForCopy = useMemo(() => {
     const years = new Set(transactions.map(t => getYear(parseISO(t.date))));
     years.add(new Date().getFullYear());
@@ -358,13 +359,11 @@ export default function Home() {
     }
   };
 
-  // ▼ 追加: メイングループ設定処理
   const handleSetDefault = async () => {
     if (!currentHousehold || !user) return;
     
     setLoading(true);
     try {
-      // RPCを呼び出して、他をfalse、これをtrueにする
       const { error } = await supabase.rpc('set_default_household', { 
         target_household_id: currentHousehold.id 
       });
@@ -372,8 +371,6 @@ export default function Home() {
       if (error) throw error;
 
       alert(`「${currentHousehold.name}」をメインのグループに設定しました。\n次回ログイン時から最初に表示されます。`);
-      
-      // グループリストを再取得して並び順を更新
       await fetchHouseholds(user.id);
       
     } catch (err: any) {
@@ -384,7 +381,6 @@ export default function Home() {
     }
   };
 
-  // ▼ 修正: is_defaultを取得し、並び替えを行う
   const fetchHouseholds = async (userId: string) => {
     const { data: members } = await supabase
       .from('household_members')
@@ -392,19 +388,18 @@ export default function Home() {
       .eq('user_id', userId);
 
     if (members && members.length > 0) {
-      // メイン(is_default=true)が先頭に来るようにソート
+      // is_default=trueを先頭に
       members.sort((a, b) => (b.is_default === true ? 1 : 0) - (a.is_default === true ? 1 : 0));
 
       const list = members.map((m: any) => ({
         ...m.households,
-        is_default: m.is_default // 拡張プロパティとして持たせる
+        is_default: m.is_default
       })) as ExtendedHousehold[];
 
       setHouseholds(list);
       
-      // 初期表示の選択
+      // 初期表示: 選択中があれば維持、なければ先頭(メイン)を選択
       setCurrentHousehold(prev => {
-        // すでに選択中ならそれを維持、なければリスト先頭（＝メイン）を選択
         if (prev) {
           return list.find(h => h.id === prev.id) || list[0];
         }
@@ -440,7 +435,7 @@ export default function Home() {
     try {
       const { data: newHousehold, error: hError } = await supabase.from('households').insert({ name, owner_id: user.id, is_edit_restricted: false }).select().single(); 
       if (hError) throw hError;
-      await supabase.from('household_members').insert({ household_id: newHousehold.id, user_id: user.id, is_default: true }); // 作成時はデフォルトにする
+      await supabase.from('household_members').insert({ household_id: newHousehold.id, user_id: user.id, is_default: true }); 
       await fetchHouseholds(user.id);
     } catch (err) { alert("作成失敗"); }
   };
@@ -490,7 +485,19 @@ export default function Home() {
     } catch (err) { console.error(err); alert('退出処理に失敗しました。'); } finally { setLoading(false); }
   };
 
-  const openNewForm = () => { setEditingTransaction(null); setIsFormOpen(true); };
+  const openNewForm = () => {
+    setEditingTransaction(null);
+    // 現在表示中の月(displayMonth)に基づいて初期値を設定
+    // 今月表示中なら「今日」、過去/未来なら「その月の1日」
+    const today = new Date();
+    if (isSameMonth(today, displayMonth)) {
+      setNewEntryDate(today);
+    } else {
+      setNewEntryDate(startOfMonth(displayMonth));
+    }
+    setIsFormOpen(true);
+  };
+
   const openEditForm = (t: Transaction) => { setEditingTransaction(t); setIsFormOpen(true); };
 
   const copyInviteLink = () => {
@@ -973,7 +980,7 @@ export default function Home() {
                 )}
               </div>
               
-              {/* ▼ メイングループ設定ボタン */}
+              {/* メイングループ設定 */}
               {currentHousehold && (
                 <div className="pt-2">
                   {currentHousehold.is_default ? (
@@ -1159,6 +1166,7 @@ export default function Home() {
         onSuccess={fetchTransactions}
         householdId={currentHousehold?.id}
         initialData={editingTransaction}
+        defaultDate={newEntryDate}
       />
     </div>
   );
