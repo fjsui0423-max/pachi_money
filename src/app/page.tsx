@@ -145,7 +145,6 @@ export default function Home() {
           email, 
           password, 
           options: { 
-            emailRedirectTo: `${window.location.origin}/`,
             data: { username: username || '名無し' } 
           } 
         });
