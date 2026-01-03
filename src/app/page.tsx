@@ -2,7 +2,6 @@
 
 import { useEffect, useState, useMemo, useRef } from 'react';
 import Link from 'next/link';
-// ▼ 追加: CSVパース用
 import Papa from 'papaparse';
 import { supabase } from '@/lib/supabase';
 import { Household, Transaction, HouseholdMember } from '@/types';
@@ -19,13 +18,15 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+// ▼ 追加: Select関連コンポーネント
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'; 
 import { 
   LogOut, Users, Wallet, Settings, Trash2,
   Calendar as CalendarIcon, NotebookPen, PieChart, History,
   ChevronLeft, ChevronRight, ArrowUpDown, Filter, Save, Lock, UserCircle, ArrowLeft, X,
-  DoorOpen, Mail, UserX, FileUp // ▼ 追加: インポート用アイコン
+  DoorOpen, Mail, UserX, FileUp, Copy
 } from 'lucide-react';
-import { format, addMonths, subMonths, startOfMonth, endOfMonth, isWithinInterval, parseISO, startOfYear, endOfYear } from 'date-fns';
+import { format, addMonths, subMonths, startOfMonth, endOfMonth, isWithinInterval, parseISO, startOfYear, endOfYear, getYear } from 'date-fns';
 import { ja } from 'date-fns/locale';
 
 const AnalysisView = dynamic(
@@ -72,13 +73,17 @@ export default function Home() {
   const [editGroupName, setEditGroupName] = useState('');
   const [isEditRestricted, setIsEditRestricted] = useState(false);
 
-  // スワイプ操作用
   const touchStart = useRef<number | null>(null);
   const touchEnd = useRef<number | null>(null);
   const minSwipeDistance = 50;
 
-  // ▼ 追加: ファイルインポート用Ref
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // ▼ データコピー用ステート
+  const [copyTargetHouseholdId, setCopyTargetHouseholdId] = useState<string>('');
+  const [copyRange, setCopyRange] = useState<'all' | 'year' | 'month'>('all');
+  const [copyYear, setCopyYear] = useState<string>(new Date().getFullYear().toString());
+  const [copyMonth, setCopyMonth] = useState<string>((new Date().getMonth() + 1).toString());
 
   useEffect(() => { checkUser(); }, []);
   
@@ -97,6 +102,13 @@ export default function Home() {
       getProfile();
     }
   }, [user]);
+
+  // ▼ コピー用の「年」リスト生成 (現在のトランザクションから抽出)
+  const availableYearsForCopy = useMemo(() => {
+    const years = new Set(transactions.map(t => getYear(parseISO(t.date))));
+    years.add(new Date().getFullYear());
+    return Array.from(years).sort((a, b) => b - a);
+  }, [transactions]);
 
   const checkUser = async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -192,7 +204,6 @@ export default function Home() {
     }
   };
 
-  // ▼ CSVインポート処理 (日付,店舗,機種,投資額,回収額,収支,メモ)
   const handleImportCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !currentHousehold || !user) return;
@@ -214,26 +225,18 @@ export default function Home() {
           let errorCount = 0;
 
           for (const row of rows) {
-            // 必須チェック: 日付がない行はスキップ
             if (!row['日付']) {
               continue;
             }
 
             try {
-              // 日付の変換 (YYYY/MM/DD → YYYY-MM-DD)
               const formattedDate = row['日付'].replace(/\//g, '-');
-
-              // 数値の変換 (カンマ除去して数値化、空欄は0)
               const investment = parseInt(String(row['投資額'] || '0').replace(/,/g, ''), 10) || 0;
               const recovery = parseInt(String(row['回収額'] || '0').replace(/,/g, ''), 10) || 0;
-              
-              // 収支の取得 (CSVの値を優先)
               let amount = parseInt(String(row['収支'] || '0').replace(/,/g, ''), 10);
-              // 収支が0で、投資回収のどちらかが入力されている場合は念のため計算
+              
               if (amount === 0 && (investment !== 0 || recovery !== 0)) {
-                 // ここではCSVの値を尊重するため、特になにもせず amount=0 のままにするか、
-                 // もしくは amount = recovery - investment; と計算してもよいですが、
-                 // 基本的にCSVの「収支」列を信じる実装にします。
+                 // 必要なら計算
               }
 
               insertData.push({
@@ -282,6 +285,83 @@ export default function Home() {
         setLoading(false);
       }
     });
+  };
+
+  // ▼ データコピー処理（期間指定対応）
+  const handleCopyData = async () => {
+    if (!currentHousehold || !user || !copyTargetHouseholdId) return;
+    
+    const targetHousehold = households.find(h => h.id === copyTargetHouseholdId);
+    if (!targetHousehold) return;
+
+    // 確認メッセージの作成
+    let rangeMsg = "全期間";
+    if (copyRange === 'year') rangeMsg = `${copyYear}年の`;
+    if (copyRange === 'month') rangeMsg = `${copyYear}年${copyMonth}月の`;
+
+    if (!confirm(`現在のグループ「${currentHousehold.name}」のデータ（${rangeMsg}）を、\nグループ「${targetHousehold.name}」にコピーしますか？\n\n※ データは追加登録されます（上書きされません）。`)) return;
+
+    setLoading(true);
+    try {
+      // 1. クエリの構築（期間フィルタ）
+      let query = supabase
+        .from('transactions')
+        .select('*')
+        .eq('household_id', currentHousehold.id);
+
+      if (copyRange === 'year') {
+        // 年単位: その年の1/1〜12/31
+        const startDate = `${copyYear}-01-01`;
+        const endDate = `${copyYear}-12-31`;
+        query = query.gte('date', startDate).lte('date', endDate);
+      } else if (copyRange === 'month') {
+        // 月単位: その月の初日〜末日
+        const targetDate = new Date(parseInt(copyYear), parseInt(copyMonth) - 1, 1);
+        const startDate = format(startOfMonth(targetDate), 'yyyy-MM-dd');
+        const endDate = format(endOfMonth(targetDate), 'yyyy-MM-dd');
+        query = query.gte('date', startDate).lte('date', endDate);
+      }
+
+      const { data: sourceTransactions, error: fetchError } = await query;
+      
+      if (fetchError) throw fetchError;
+      if (!sourceTransactions || sourceTransactions.length === 0) {
+        alert("指定された期間のコピー元データがありません。");
+        return;
+      }
+
+      // 2. コピー用データを作成
+      const insertData = sourceTransactions.map(t => ({
+        household_id: targetHousehold.id, // コピー先ID
+        user_id: user.id,
+        date: t.date,
+        shop_name: t.shop_name,
+        machine_name: t.machine_name,
+        investment: t.investment,
+        recovery: t.recovery,
+        amount: t.amount,
+        type: t.type,
+        memo: t.memo,
+        created_at: new Date().toISOString()
+      }));
+
+      // 3. 一括挿入
+      const { error: insertError } = await supabase
+        .from('transactions')
+        .insert(insertData);
+      
+      if (insertError) throw insertError;
+
+      alert(`${insertData.length}件のデータをコピーしました！`);
+      setIsSettingsOpen(false);
+      setCopyTargetHouseholdId(''); 
+      
+    } catch (err: any) {
+      console.error(err);
+      alert(`コピーに失敗しました: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const fetchHouseholds = async (userId: string) => {
@@ -890,6 +970,90 @@ export default function Home() {
                 <p className="text-[10px] text-slate-400 mt-1 pl-1">
                   ※ 現在選択中のグループに追加されます。
                 </p>
+              </div>
+
+              {/* ▼ データコピー機能 */}
+              <div className="border-t pt-4 mt-4">
+                <Label className="flex items-center gap-2 mb-2 text-slate-700">
+                  <Copy className="w-4 h-4" /> データを別のグループへコピー
+                </Label>
+                <div className="space-y-3">
+                  
+                  {/* コピー先・範囲の選択 */}
+                  <div className="grid grid-cols-2 gap-2">
+                     <Select 
+                       value={copyTargetHouseholdId}
+                       onValueChange={setCopyTargetHouseholdId}
+                     >
+                       <SelectTrigger className="w-full text-xs">
+                         <SelectValue placeholder="コピー先..." />
+                       </SelectTrigger>
+                       <SelectContent>
+                         {households
+                           .filter(h => h.id !== currentHousehold?.id)
+                           .map(h => (
+                             <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>
+                           ))
+                         }
+                       </SelectContent>
+                     </Select>
+
+                     <Select 
+                       value={copyRange}
+                       onValueChange={(val: any) => setCopyRange(val)}
+                     >
+                       <SelectTrigger className="w-full text-xs">
+                         <SelectValue />
+                       </SelectTrigger>
+                       <SelectContent>
+                         <SelectItem value="all">全期間</SelectItem>
+                         <SelectItem value="year">年単位</SelectItem>
+                         <SelectItem value="month">月単位</SelectItem>
+                       </SelectContent>
+                     </Select>
+                  </div>
+
+                  {/* 年・月の選択 (範囲がall以外の場合に表示) */}
+                  {copyRange !== 'all' && (
+                    <div className="flex gap-2">
+                       <Select value={copyYear} onValueChange={setCopyYear}>
+                         <SelectTrigger className="w-full text-xs">
+                           <SelectValue placeholder="年" />
+                         </SelectTrigger>
+                         <SelectContent>
+                           {availableYearsForCopy.map(y => (
+                             <SelectItem key={y} value={y.toString()}>{y}年</SelectItem>
+                           ))}
+                         </SelectContent>
+                       </Select>
+
+                       {copyRange === 'month' && (
+                         <Select value={copyMonth} onValueChange={setCopyMonth}>
+                           <SelectTrigger className="w-full text-xs">
+                             <SelectValue placeholder="月" />
+                           </SelectTrigger>
+                           <SelectContent>
+                             {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
+                               <SelectItem key={m} value={m.toString()}>{m}月</SelectItem>
+                             ))}
+                           </SelectContent>
+                         </Select>
+                       )}
+                    </div>
+                  )}
+
+                  <Button 
+                    variant="outline"
+                    onClick={handleCopyData}
+                    disabled={!copyTargetHouseholdId}
+                    className="w-full"
+                  >
+                    コピー実行
+                  </Button>
+                  <p className="text-[10px] text-slate-400 pl-1">
+                    ※ 選択した範囲の記録が、選択したグループに追加されます。
+                  </p>
+                </div>
               </div>
 
               <div className="border-t pt-2 mt-2">

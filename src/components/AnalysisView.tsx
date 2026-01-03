@@ -223,7 +223,7 @@ export const AnalysisView = ({ transactions, onSelectMachine, onSelectShop }: Pr
                       <SelectValue placeholder="月" />
                     </SelectTrigger>
                     <SelectContent className="max-h-[200px]">
-                      <SelectItem value="all">1年通して</SelectItem>
+                      <SelectItem value="all">通年</SelectItem>
                       {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
                         <SelectItem key={m} value={String(m).padStart(2, '0')}>{m}月</SelectItem>
                       ))}
