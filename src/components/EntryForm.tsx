@@ -124,7 +124,8 @@ export const EntryForm = ({ isOpen, onClose, onSuccess, householdId, initialData
   return (
     <>
       <Dialog open={isOpen} onOpenChange={onClose}>
-        <DialogContent className="max-w-md w-full max-h-[90vh] overflow-y-auto">
+        {/* ▼ 修正: w-[95%] rounded-xl overflow-x-hidden を追加し、横スクロールを防止 */}
+        <DialogContent className="max-w-md w-[95%] rounded-xl max-h-[90vh] overflow-y-auto overflow-x-hidden">
           <DialogHeader>
             <DialogTitle>{initialData ? '記録の編集' : '新規記録'}</DialogTitle>
           </DialogHeader>
@@ -164,7 +165,6 @@ export const EntryForm = ({ isOpen, onClose, onSuccess, householdId, initialData
                   className="text-right font-mono text-lg" 
                   placeholder="0" 
                 />
-                {/* ▼ +0.5kボタンを追加し、flex-wrapで折り返しに対応 */}
                 <div className="flex gap-1 justify-end flex-wrap">
                   <Button type="button" variant="outline" size="sm" className="h-7 text-xs px-2" onClick={() => addAmount(investment, setInvestment, 500)}>+0.5k</Button>
                   <Button type="button" variant="outline" size="sm" className="h-7 text-xs px-2" onClick={() => addAmount(investment, setInvestment, 1000)}>+1k</Button>
@@ -183,7 +183,6 @@ export const EntryForm = ({ isOpen, onClose, onSuccess, householdId, initialData
                   className="text-right font-mono text-lg" 
                   placeholder="0" 
                 />
-                {/* ▼ +0.5kボタンを追加し、flex-wrapで折り返しに対応 */}
                 <div className="flex gap-1 justify-end flex-wrap">
                   <Button type="button" variant="outline" size="sm" className="h-7 text-xs px-2" onClick={() => addAmount(recovery, setRecovery, 500)}>+0.5k</Button>
                   <Button type="button" variant="outline" size="sm" className="h-7 text-xs px-2" onClick={() => addAmount(recovery, setRecovery, 1000)}>+1k</Button>

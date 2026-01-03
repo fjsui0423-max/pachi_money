@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react'; // ★ useRefを追加
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { Household, Transaction, HouseholdMember } from '@/types';
@@ -21,7 +21,7 @@ import {
   LogOut, Users, Wallet, Settings, Trash2,
   Calendar as CalendarIcon, NotebookPen, PieChart, History,
   ChevronLeft, ChevronRight, ArrowUpDown, Filter, Save, Lock, UserCircle, ArrowLeft, X,
-  DoorOpen, Mail, UserX // ★追加: アカウント削除用アイコン
+  DoorOpen, Mail, UserX
 } from 'lucide-react';
 import { format, addMonths, subMonths, startOfMonth, endOfMonth, isWithinInterval, parseISO, startOfYear, endOfYear } from 'date-fns';
 import { ja } from 'date-fns/locale';
@@ -69,6 +69,11 @@ export default function Home() {
 
   const [editGroupName, setEditGroupName] = useState('');
   const [isEditRestricted, setIsEditRestricted] = useState(false);
+
+  // ★ スワイプ検出用のRef
+  const touchStart = useRef<number | null>(null);
+  const touchEnd = useRef<number | null>(null);
+  const minSwipeDistance = 50; // スワイプと判定する最小距離
 
   useEffect(() => { checkUser(); }, []);
   
@@ -163,30 +168,20 @@ export default function Home() {
     setUser(null); setHouseholds([]); setTransactions([]); setMembers([]); setCurrentHousehold(null);
   };
 
-  // ★追加: アカウント削除機能
   const deleteAccount = async () => {
     if (!user) return;
-    
     if (!confirm("【重要】アカウントを削除しますか？\n\n・全ての収支データが完全に削除されます\n・あなたがオーナーのグループも削除されます\n・この操作は取り消せません")) return;
     if (!confirm("最終確認です。本当によろしいですか？")) return;
-
     try {
       setLoading(true);
-      // SQLで作成した関数を呼び出し
       const { error } = await supabase.rpc('delete_own_account');
-      
       if (error) throw error;
-
       await supabase.auth.signOut();
-      setUser(null);
-      setHouseholds([]);
-      setTransactions([]);
-      setIsSettingsOpen(false);
+      setUser(null); setHouseholds([]); setTransactions([]); setIsSettingsOpen(false);
       alert("アカウントを削除しました。ご利用ありがとうございました。");
-      
     } catch (err: any) {
       console.error(err);
-      alert("削除に失敗しました。時間をおいて再度お試しいただくか、お問い合わせください。");
+      alert("削除に失敗しました。");
     } finally {
       setLoading(false);
     }
@@ -357,6 +352,28 @@ export default function Home() {
     if (mode !== 'list' && filterCondition.type !== null) clearFilter();
     if (mode === 'calendar') setViewRange('month');
     setViewMode(mode);
+  };
+
+  // ★ スワイプ検出ハンドラ
+  const onTouchStart = (e: React.TouchEvent) => {
+    touchEnd.current = null;
+    touchStart.current = e.targetTouches[0].clientX;
+  };
+  const onTouchMove = (e: React.TouchEvent) => {
+    touchEnd.current = e.targetTouches[0].clientX;
+  };
+  const onTouchEnd = () => {
+    if (!touchStart.current || !touchEnd.current) return;
+    const distance = touchStart.current - touchEnd.current;
+    const isLeftSwipe = distance > minSwipeDistance;
+    const isRightSwipe = distance < -minSwipeDistance;
+
+    if (isLeftSwipe) {
+      nextMonth();
+    }
+    if (isRightSwipe) {
+      prevMonth();
+    }
   };
 
   if (!user) {
@@ -552,7 +569,13 @@ export default function Home() {
 
             {viewMode === 'calendar' ? (
               <div className="space-y-4">
-                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                {/* ▼ カレンダーの外枠にタッチハンドラを追加 */}
+                <div 
+                  className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden"
+                  onTouchStart={onTouchStart}
+                  onTouchMove={onTouchMove}
+                  onTouchEnd={onTouchEnd}
+                >
                   <div className="bg-slate-50/50 border-b border-slate-100 px-3 py-2 flex justify-between items-center">
                     <div className="flex items-center gap-1">
                        <Button variant="ghost" size="icon" onClick={prevMonth} className="h-7 w-7 text-slate-400 hover:text-slate-600">
@@ -700,7 +723,6 @@ export default function Home() {
           </DialogHeader>
           
           <div className="space-y-6 py-4">
-            {/* アカウント設定エリア */}
             <div className="space-y-4 border p-4 rounded-lg bg-blue-50/50">
               <Label className="flex items-center gap-2 text-base text-blue-800">
                 <UserCircle className="w-5 h-5" /> アカウント設定
@@ -718,7 +740,6 @@ export default function Home() {
               </div>
             </div>
 
-            {/* グループ設定エリア */}
             <div className="space-y-4 border p-4 rounded-lg bg-slate-50">
                <Label className="flex items-center gap-2 text-base text-slate-800">
                 <Settings className="w-5 h-5" /> グループ設定
@@ -757,7 +778,6 @@ export default function Home() {
                 </Button>
               </div>
 
-              {/* グループ削除・退出 */}
               <div className="border-t pt-2 mt-2">
                 {isOwner ? (
                   <Button variant="ghost" className="w-full justify-start h-10 text-red-600 hover:text-red-700 hover:bg-red-50" onClick={deleteHousehold}>
@@ -771,13 +791,11 @@ export default function Home() {
               </div>
             </div>
 
-            {/* 下部エリア: ログアウトとアカウント削除 */}
             <div className="border-t pt-4 mt-4 space-y-6">
                <Button variant="outline" className="w-full justify-start h-12" onClick={handleLogout}>
                  <LogOut className="w-4 h-4 mr-2" /> ログアウト
                </Button>
                
-               {/* ★追加: アカウント削除ボタンエリア */}
                <div className="bg-red-50 rounded-lg p-3 border border-red-100">
                  <p className="text-xs text-red-500 font-bold mb-2">危険な操作（Danger Zone）</p>
                  <Button variant="destructive" className="w-full justify-start h-10 bg-red-100 text-red-600 hover:bg-red-200 border-red-200 shadow-none" onClick={deleteAccount}>
