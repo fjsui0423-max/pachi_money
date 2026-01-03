@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useState, useMemo, useRef } from 'react'; // ★ useRefを追加
+import { useEffect, useState, useMemo, useRef } from 'react';
 import Link from 'next/link';
+// ▼ 追加: CSVパース用
+import Papa from 'papaparse';
 import { supabase } from '@/lib/supabase';
 import { Household, Transaction, HouseholdMember } from '@/types';
 import { TransactionItem } from '@/components/TransactionItem';
@@ -21,7 +23,7 @@ import {
   LogOut, Users, Wallet, Settings, Trash2,
   Calendar as CalendarIcon, NotebookPen, PieChart, History,
   ChevronLeft, ChevronRight, ArrowUpDown, Filter, Save, Lock, UserCircle, ArrowLeft, X,
-  DoorOpen, Mail, UserX
+  DoorOpen, Mail, UserX, FileUp // ▼ 追加: インポート用アイコン
 } from 'lucide-react';
 import { format, addMonths, subMonths, startOfMonth, endOfMonth, isWithinInterval, parseISO, startOfYear, endOfYear } from 'date-fns';
 import { ja } from 'date-fns/locale';
@@ -70,10 +72,13 @@ export default function Home() {
   const [editGroupName, setEditGroupName] = useState('');
   const [isEditRestricted, setIsEditRestricted] = useState(false);
 
-  // ★ スワイプ検出用のRef
+  // スワイプ操作用
   const touchStart = useRef<number | null>(null);
   const touchEnd = useRef<number | null>(null);
-  const minSwipeDistance = 50; // スワイプと判定する最小距離
+  const minSwipeDistance = 50;
+
+  // ▼ 追加: ファイルインポート用Ref
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { checkUser(); }, []);
   
@@ -185,6 +190,98 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // ▼ CSVインポート処理 (日付,店舗,機種,投資額,回収額,収支,メモ)
+  const handleImportCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !currentHousehold || !user) return;
+
+    if (!confirm("CSVデータをインポートしますか？\n※ 「日付,店舗,機種,投資額,回収額,収支,メモ」の形式に対応しています。\n※ 現在のグループに追加されます。")) {
+      e.target.value = '';
+      return;
+    }
+
+    setLoading(true);
+
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: async (results) => {
+        try {
+          const rows = results.data as any[];
+          const insertData: any[] = [];
+          let errorCount = 0;
+
+          for (const row of rows) {
+            // 必須チェック: 日付がない行はスキップ
+            if (!row['日付']) {
+              continue;
+            }
+
+            try {
+              // 日付の変換 (YYYY/MM/DD → YYYY-MM-DD)
+              const formattedDate = row['日付'].replace(/\//g, '-');
+
+              // 数値の変換 (カンマ除去して数値化、空欄は0)
+              const investment = parseInt(String(row['投資額'] || '0').replace(/,/g, ''), 10) || 0;
+              const recovery = parseInt(String(row['回収額'] || '0').replace(/,/g, ''), 10) || 0;
+              
+              // 収支の取得 (CSVの値を優先)
+              let amount = parseInt(String(row['収支'] || '0').replace(/,/g, ''), 10);
+              // 収支が0で、投資回収のどちらかが入力されている場合は念のため計算
+              if (amount === 0 && (investment !== 0 || recovery !== 0)) {
+                 // ここではCSVの値を尊重するため、特になにもせず amount=0 のままにするか、
+                 // もしくは amount = recovery - investment; と計算してもよいですが、
+                 // 基本的にCSVの「収支」列を信じる実装にします。
+              }
+
+              insertData.push({
+                household_id: currentHousehold.id,
+                user_id: user.id,
+                date: formattedDate,
+                shop_name: row['店舗'] || '',
+                machine_name: row['機種'] || '',
+                investment: investment,
+                recovery: recovery,
+                amount: amount,
+                type: amount >= 0 ? 'income' : 'expense',
+                memo: row['メモ'] || '',
+                created_at: new Date().toISOString()
+              });
+
+            } catch (rowErr) {
+              console.error("行のパースエラー:", row, rowErr);
+              errorCount++;
+            }
+          }
+
+          if (insertData.length === 0) {
+            alert("インポートできるデータが見つかりませんでした。\nCSVのヘッダーが「日付,店舗,機種...」となっているか確認してください。");
+            return;
+          }
+
+          const { error } = await supabase.from('transactions').insert(insertData);
+          if (error) throw error;
+
+          alert(`${insertData.length} 件のデータをインポートしました！`);
+          setIsSettingsOpen(false);
+          fetchTransactions();
+
+        } catch (err: any) {
+          console.error(err);
+          alert(`インポートに失敗しました: ${err.message}`);
+        } finally {
+          setLoading(false);
+          if (fileInputRef.current) fileInputRef.current.value = '';
+        }
+      },
+      error: (err) => {
+        console.error(err);
+        alert("ファイルの読み込みに失敗しました。");
+        setLoading(false);
+      }
+    });
   };
 
   const fetchHouseholds = async (userId: string) => {
@@ -354,7 +451,6 @@ export default function Home() {
     setViewMode(mode);
   };
 
-  // ★ スワイプ検出ハンドラ
   const onTouchStart = (e: React.TouchEvent) => {
     touchEnd.current = null;
     touchStart.current = e.targetTouches[0].clientX;
@@ -569,7 +665,6 @@ export default function Home() {
 
             {viewMode === 'calendar' ? (
               <div className="space-y-4">
-                {/* ▼ カレンダーの外枠にタッチハンドラを追加 */}
                 <div 
                   className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden"
                   onTouchStart={onTouchStart}
@@ -681,13 +776,6 @@ export default function Home() {
               />
             )}
 
-            <div className="mt-6 mb-2">
-              <div className="w-full h-16 bg-slate-100 rounded-lg border border-dashed border-slate-200 flex items-center justify-center text-xs text-slate-400 overflow-hidden relative mx-auto max-w-sm">
-                  <span className="z-10 font-medium">広告スペース</span>
-                  <div className="absolute inset-0 opacity-5 bg-[radial-gradient(#cbd5e1_1px,transparent_1px)] [background-size:8px_8px]"></div>
-              </div>
-            </div>
-
             <div className="fixed bottom-4 left-4 right-4 max-w-md mx-auto z-50">
                <div className="bg-white/90 backdrop-blur-md p-1.5 rounded-2xl shadow-xl border border-slate-200/60 flex justify-around items-center">
                 {[
@@ -776,6 +864,32 @@ export default function Home() {
                 <Button variant="ghost" size="sm" className="h-8 text-xs text-slate-500 hover:text-blue-600" onClick={copyInviteLink}>
                   <Users className="w-3 h-3 mr-1" /> 招待リンクをコピー
                 </Button>
+              </div>
+
+              {/* CSVインポート機能 */}
+              <div className="border-t pt-4 mt-4">
+                <Label className="flex items-center gap-2 mb-2 text-slate-700">
+                  <FileUp className="w-4 h-4" /> データインポート
+                </Label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="file"
+                    accept=".csv"
+                    ref={fileInputRef}
+                    onChange={handleImportCSV}
+                    className="hidden"
+                  />
+                  <Button 
+                    variant="outline" 
+                    className="w-full justify-start text-slate-600 hover:text-blue-600"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    CSVファイルを読み込む
+                  </Button>
+                </div>
+                <p className="text-[10px] text-slate-400 mt-1 pl-1">
+                  ※ 現在選択中のグループに追加されます。
+                </p>
               </div>
 
               <div className="border-t pt-2 mt-2">
