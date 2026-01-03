@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval, subMonths, getYear, startOfYear, endOfYear } from 'date-fns';
 import { ja } from 'date-fns/locale';
-import { BarChart3, Store, Gamepad2, ChevronRight, TrendingUp } from 'lucide-react';
+import { BarChart3, Store, Gamepad2, ChevronRight, TrendingUp, AlertCircle } from 'lucide-react'; // AlertCircle追加
 
 type Props = {
   transactions: Transaction[];
@@ -29,14 +29,11 @@ type AggregatedData = {
 };
 
 export const AnalysisView = ({ transactions, onSelectMachine, onSelectShop }: Props) => {
-  // 月別収支用の年フィルタ
   const [yearFilter, setYearFilter] = useState<string>('recent');
-  
-  // ▼ 変更: 資産推移用のフィルタを「年」と「月」に分割
-  const [assetYear, setAssetYear] = useState<string>('all'); // 'all' | '2024'
-  const [assetMonth, setAssetMonth] = useState<string>('all'); // 'all' | '01' ~ '12'
+  const [assetYear, setAssetYear] = useState<string>('all');
+  const [assetMonth, setAssetMonth] = useState<string>('all');
 
-  // データが存在する「年」のリスト
+  // データが存在する「年」のリスト (データがない場合でも現在の年は含める)
   const availableYears = useMemo(() => {
     const years = new Set(transactions.map(t => getYear(parseISO(t.date))));
     years.add(getYear(new Date()));
@@ -68,68 +65,46 @@ export const AnalysisView = ({ transactions, onSelectMachine, onSelectShop }: Pr
     });
   }, [transactions, yearFilter]);
 
-  // ▼ 修正: 資産推移データの生成 (2段階フィルタ対応)
+  // 月別収支の実データがあるか判定 (すべて0ならデータなしとみなす)
+  const hasMonthlyData = useMemo(() => {
+    return monthlyData.some(d => d.balance !== 0);
+  }, [monthlyData]);
+
+  // 資産推移データ生成
   const assetData = useMemo(() => {
-    // 1. 期間でフィルタリング
     let targetTransactions = [...transactions];
     
-    // 年フィルタ
     if (assetYear !== 'all') {
-      targetTransactions = targetTransactions.filter(t => {
-        return getYear(parseISO(t.date)).toString() === assetYear;
-      });
-
-      // 月フィルタ (年が選択されている場合のみ有効)
+      targetTransactions = targetTransactions.filter(t => getYear(parseISO(t.date)).toString() === assetYear);
       if (assetMonth !== 'all') {
-        targetTransactions = targetTransactions.filter(t => {
-          return format(parseISO(t.date), 'MM') === assetMonth;
-        });
+        targetTransactions = targetTransactions.filter(t => format(parseISO(t.date), 'MM') === assetMonth);
       }
     }
 
-    // 日付順にソート
     targetTransactions.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 
-    // 2. 累積収支を計算
     let current = 0;
     const data: { date: string; amount: number; label: string }[] = [];
     
     targetTransactions.forEach(t => {
       current += t.amount;
-      
-      // ラベルのフォーマット調整
       let label = t.date;
       try {
         const d = parseISO(t.date);
-        if (assetYear !== 'all' && assetMonth !== 'all') {
-          // 月単位表示なら「1日」
-          label = format(d, 'd日'); 
-        } else if (assetYear !== 'all') {
-          // 年単位表示なら「1/1」
-          label = format(d, 'M/d');
-        } else {
-          // 全期間なら「23/1/1」
-          label = format(d, 'yy/M/d');
-        }
+        if (assetYear !== 'all' && assetMonth !== 'all') label = format(d, 'd日');
+        else if (assetYear !== 'all') label = format(d, 'M/d');
+        else label = format(d, 'yy/M/d');
       } catch (e) {}
 
-      data.push({
-        date: t.date,
-        amount: current,
-        label: label
-      });
+      data.push({ date: t.date, amount: current, label });
     });
 
-    // データ点数の間引き
     if (data.length > 60) {
       return data.filter((_, i) => i === 0 || i === data.length - 1 || i % Math.ceil(data.length / 60) === 0);
     }
-    
-    if (data.length === 0) return [];
     return data;
   }, [transactions, assetYear, assetMonth]);
 
-  // 集計関数
   const aggregate = (key: 'machine_name' | 'shop_name'): AggregatedData[] => {
     const map = new Map<string, AggregatedData>();
     transactions.forEach(t => {
@@ -182,7 +157,16 @@ export const AnalysisView = ({ transactions, onSelectMachine, onSelectShop }: Pr
                 </SelectContent>
               </Select>
             </CardHeader>
-            <CardContent className="h-[250px] w-full pt-2">
+            <CardContent className="h-[250px] w-full pt-2 relative">
+              {/* ▼ データがない場合のオーバーレイ表示 */}
+              {!hasMonthlyData && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/60 z-10">
+                  <AlertCircle className="w-8 h-8 text-slate-300 mb-2" />
+                  <p className="text-sm text-slate-500 font-bold">データがありません</p>
+                  <p className="text-xs text-slate-400">この期間の収支記録はありません</p>
+                </div>
+              )}
+              
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={monthlyData} margin={{ top: 10, right: 10, left: 0, bottom: 20 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
@@ -214,14 +198,12 @@ export const AnalysisView = ({ transactions, onSelectMachine, onSelectShop }: Pr
                 </CardTitle>
               </div>
               
-              {/* ▼ 修正: 2つのセレクトボックスを横並びに配置 */}
               <div className="flex items-center justify-end gap-2 w-full">
-                {/* 1. 年選択 */}
                 <Select 
                   value={assetYear} 
                   onValueChange={(val) => {
                     setAssetYear(val);
-                    setAssetMonth('all'); // 年を変えたら月はリセット
+                    setAssetMonth('all');
                   }}
                 >
                   <SelectTrigger className="w-[100px] h-8 text-xs bg-slate-50 border-slate-200">
@@ -235,7 +217,6 @@ export const AnalysisView = ({ transactions, onSelectMachine, onSelectShop }: Pr
                   </SelectContent>
                 </Select>
 
-                {/* 2. 月選択 (年が指定されている場合のみ表示) */}
                 {assetYear !== 'all' && (
                   <Select value={assetMonth} onValueChange={setAssetMonth}>
                     <SelectTrigger className="w-[80px] h-8 text-xs bg-slate-50 border-slate-200">
@@ -252,7 +233,16 @@ export const AnalysisView = ({ transactions, onSelectMachine, onSelectShop }: Pr
               </div>
 
             </CardHeader>
-            <CardContent className="h-[250px] w-full pt-2">
+            <CardContent className="h-[250px] w-full pt-2 relative">
+               {/* ▼ データがない場合のオーバーレイ表示 */}
+               {assetData.length === 0 && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/60 z-10">
+                  <AlertCircle className="w-8 h-8 text-slate-300 mb-2" />
+                  <p className="text-sm text-slate-500 font-bold">データがありません</p>
+                  <p className="text-xs text-slate-400">選択された期間の記録はありません</p>
+                </div>
+              )}
+
                <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={assetData} margin={{ top: 10, right: 10, left: 0, bottom: 20 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
@@ -282,11 +272,6 @@ export const AnalysisView = ({ transactions, onSelectMachine, onSelectShop }: Pr
                   <Line type="monotone" dataKey="amount" stroke="#10b981" strokeWidth={2} dot={false} />
                 </LineChart>
               </ResponsiveContainer>
-              {assetData.length === 0 && (
-                <div className="absolute inset-0 flex items-center justify-center text-slate-400 text-xs">
-                  データがありません
-                </div>
-              )}
             </CardContent>
           </Card>
         </TabsContent>
