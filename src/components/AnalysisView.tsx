@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Transaction } from '@/types';
 import { 
   BarChart, Bar, XAxis, YAxis, Tooltip, 
@@ -8,7 +8,8 @@ import {
 } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval, subMonths } from 'date-fns';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel } from '@/components/ui/select';
+import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval, subMonths, getYear, startOfYear, endOfYear, isSameMonth, isSameYear } from 'date-fns';
 import { ja } from 'date-fns/locale';
 import { BarChart3, Store, Gamepad2, ChevronRight, TrendingUp } from 'lucide-react';
 
@@ -28,13 +29,40 @@ type AggregatedData = {
 };
 
 export const AnalysisView = ({ transactions, onSelectMachine, onSelectShop }: Props) => {
-  // 月別収支 (直近12ヶ月)
-  const monthlyData = useMemo(() => {
-    const end = endOfMonth(new Date());
-    const start = startOfMonth(subMonths(new Date(), 11));
-    const months = eachMonthOfInterval({ start, end });
+  // 月別収支用の年フィルタ
+  const [yearFilter, setYearFilter] = useState<string>('recent');
+  
+  // ▼ 追加: 資産推移用の期間フィルタ ('all' | 'year_2024' | 'month_2024-01')
+  const [assetRange, setAssetRange] = useState<string>('all');
 
-    const data = months.map(month => {
+  // データが存在する「年」のリスト
+  const availableYears = useMemo(() => {
+    const years = new Set(transactions.map(t => getYear(parseISO(t.date))));
+    years.add(getYear(new Date()));
+    return Array.from(years).sort((a, b) => b - a);
+  }, [transactions]);
+
+  // ▼ 追加: データが存在する「年月」のリスト
+  const availableMonths = useMemo(() => {
+    const months = new Set(transactions.map(t => format(parseISO(t.date), 'yyyy-MM')));
+    months.add(format(new Date(), 'yyyy-MM'));
+    return Array.from(months).sort().reverse(); // 新しい順
+  }, [transactions]);
+
+  // 月別収支データ生成 (ロジック変更なし)
+  const monthlyData = useMemo(() => {
+    let start: Date, end: Date;
+    if (yearFilter === 'recent') {
+      end = endOfMonth(new Date());
+      start = startOfMonth(subMonths(new Date(), 11));
+    } else {
+      const year = parseInt(yearFilter, 10);
+      start = startOfYear(new Date(year, 0, 1));
+      end = endOfYear(new Date(year, 0, 1));
+    }
+
+    const months = eachMonthOfInterval({ start, end });
+    return months.map(month => {
       const monthKey = format(month, 'yyyy-MM');
       const monthTransactions = transactions.filter(t => t.date && t.date.startsWith(monthKey));
       const balance = monthTransactions.reduce((sum, t) => sum + t.amount, 0);
@@ -44,55 +72,91 @@ export const AnalysisView = ({ transactions, onSelectMachine, onSelectShop }: Pr
         balance,
       };
     });
-    return data;
-  }, [transactions]);
+  }, [transactions, yearFilter]);
 
-  // 資産推移
+  // ▼ 修正: 資産推移データの生成 (フィルタ対応)
   const assetData = useMemo(() => {
-    // 日付順にソート
-    const sorted = [...transactions].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-    let current = 0;
-    const data: { date: string; amount: number }[] = [];
+    // 1. 期間でフィルタリング
+    let targetTransactions = [...transactions];
     
-    sorted.forEach(t => {
+    if (assetRange !== 'all') {
+      const [type, val] = assetRange.split('_'); // 'year_2024' -> ['year', '2024']
+      
+      targetTransactions = targetTransactions.filter(t => {
+        const d = parseISO(t.date);
+        if (type === 'year') {
+          return getYear(d).toString() === val;
+        } else if (type === 'month') {
+          return format(d, 'yyyy-MM') === val;
+        }
+        return true;
+      });
+    }
+
+    // 日付順にソート
+    targetTransactions.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+
+    // 2. 累積収支を計算 (期間の開始を0とする)
+    let current = 0;
+    const data: { date: string; amount: number; label: string }[] = [];
+    
+    // グラフの開始点として (0,0) を追加するかどうかの検討
+    // 線がつながるように、最初の取引の前日などを入れた方が綺麗だが、今回はシンプルにデータ点のみ
+    
+    targetTransactions.forEach(t => {
       current += t.amount;
+      // X軸ラベルのフォーマット調整
+      let label = t.date;
+      try {
+        const d = parseISO(t.date);
+        if (assetRange.startsWith('month')) {
+          label = format(d, 'd日'); // 月別表示なら「1日」
+        } else if (assetRange.startsWith('year')) {
+          label = format(d, 'M/d'); // 年別表示なら「1/1」
+        } else {
+          label = format(d, 'yy/M/d'); // 全期間なら「23/1/1」
+        }
+      } catch (e) {}
+
       data.push({
         date: t.date,
-        amount: current
+        amount: current,
+        label: label
       });
     });
-    
-    // データ点数が多すぎる場合は間引く（簡易的）
-    if (data.length > 50) {
-      return data.filter((_, i) => i === 0 || i === data.length - 1 || i % Math.ceil(data.length / 50) === 0);
+
+    // データ点数が多すぎる場合の間引き処理
+    if (data.length > 60) {
+      return data.filter((_, i) => i === 0 || i === data.length - 1 || i % Math.ceil(data.length / 60) === 0);
     }
+
+    // データが1件もない場合は空配列
+    if (data.length === 0) return [];
+
+    // データが1点だけだと線が引かれないため、ダミーの開始点(0)を追加しても良いが、
+    // Rechartsは1点だと点を描画してくれるのでそのままでOK
     return data;
-  }, [transactions]);
+  }, [transactions, assetRange]);
 
   // 集計関数
   const aggregate = (key: 'machine_name' | 'shop_name'): AggregatedData[] => {
     const map = new Map<string, AggregatedData>();
-
     transactions.forEach(t => {
       const name = (key === 'machine_name' ? t.machine_name : t.shop_name) || '未設定';
       const current = map.get(name) || { name, amount: 0, count: 0, win: 0, lose: 0, draw: 0 };
-      
       current.amount += t.amount;
       current.count += 1;
       if (t.amount > 0) current.win += 1;
       else if (t.amount < 0) current.lose += 1;
       else current.draw += 1;
-
       map.set(name, current);
     });
-
     return Array.from(map.values()).sort((a, b) => b.amount - a.amount);
   };
 
   const machineData = useMemo(() => aggregate('machine_name'), [transactions]);
   const shopData = useMemo(() => aggregate('shop_name'), [transactions]);
 
-  // 金額フォーマッター
   const formatYAxis = (val: number) => {
     if (Math.abs(val) >= 10000) return `${(val / 10000).toFixed(0)}万`;
     return `${(val / 1000).toFixed(0)}k`;
@@ -111,23 +175,28 @@ export const AnalysisView = ({ transactions, onSelectMachine, onSelectShop }: Pr
           
           {/* 月別収支グラフ */}
           <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-bold text-slate-500">月別収支 (直近1年)</CardTitle>
+            <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
+              <CardTitle className="text-sm font-bold text-slate-500">
+                月別収支 {yearFilter !== 'recent' && `(${yearFilter}年)`}
+              </CardTitle>
+              <Select value={yearFilter} onValueChange={setYearFilter}>
+                <SelectTrigger className="w-[110px] h-8 text-xs bg-slate-50 border-slate-200">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="recent">直近1年</SelectItem>
+                  {availableYears.map(year => (
+                    <SelectItem key={year} value={String(year)}>{year}年</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </CardHeader>
             <CardContent className="h-[250px] w-full pt-2">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={monthlyData} margin={{ top: 10, right: 10, left: 0, bottom: 20 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                  <XAxis 
-                    dataKey="name" 
-                    tick={{fontSize: 10}} 
-                  />
-                  <YAxis 
-                    width={40} 
-                    tick={{fontSize: 10}} 
-                    tickFormatter={formatYAxis}
-                  />
-                  {/* 修正箇所 1: 引数の型を number | undefined にし、?? 0 で安全に処理 */}
+                  <XAxis dataKey="name" tick={{fontSize: 10}} />
+                  <YAxis width={40} tick={{fontSize: 10}} tickFormatter={formatYAxis} />
                   <Tooltip 
                     cursor={{fill: '#f8fafc'}}
                     contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}}
@@ -146,23 +215,49 @@ export const AnalysisView = ({ transactions, onSelectMachine, onSelectShop }: Pr
 
           {/* 資産推移グラフ */}
           <Card>
-            <CardHeader className="pb-2">
+            <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
               <CardTitle className="text-sm font-bold text-slate-500 flex items-center gap-2">
                 <TrendingUp className="w-4 h-4" />
                 資産推移
               </CardTitle>
+              {/* ▼ 追加: 期間選択ドロップダウン */}
+              <Select value={assetRange} onValueChange={setAssetRange}>
+                <SelectTrigger className="w-[120px] h-8 text-xs bg-slate-50 border-slate-200">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="max-h-[300px]">
+                  <SelectItem value="all">全期間</SelectItem>
+                  
+                  {/* 年別グループ */}
+                  <SelectGroup>
+                    <SelectLabel className="text-xs text-slate-400 font-normal px-2 py-1">年別</SelectLabel>
+                    {availableYears.map(year => (
+                      <SelectItem key={`year-${year}`} value={`year_${year}`}>{year}年</SelectItem>
+                    ))}
+                  </SelectGroup>
+
+                  {/* 月別グループ */}
+                  <SelectGroup>
+                    <SelectLabel className="text-xs text-slate-400 font-normal px-2 py-1">月別</SelectLabel>
+                    {availableMonths.slice(0, 12).map(month => ( // 直近12ヶ月分のみ表示
+                      <SelectItem key={`month-${month}`} value={`month_${month}`}>
+                        {format(parseISO(month + '-01'), 'yyyy年M月', { locale: ja })}
+                      </SelectItem>
+                    ))}
+                    {/* もっと過去の月が必要なら slice を外してください */}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
             </CardHeader>
             <CardContent className="h-[250px] w-full pt-2">
                <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={assetData} margin={{ top: 10, right: 10, left: 0, bottom: 20 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                   <XAxis 
-                    dataKey="date" 
-                    tickFormatter={(val) => {
-                      try { return format(parseISO(val), 'M/d'); } catch { return val; }
-                    }}
+                    dataKey="label" // 生成した短いラベルを使用
                     tick={{fontSize: 10}} 
                     minTickGap={30}
+                    interval="preserveStartEnd"
                   />
                   <YAxis 
                     width={40} 
@@ -170,16 +265,26 @@ export const AnalysisView = ({ transactions, onSelectMachine, onSelectShop }: Pr
                     tickFormatter={formatYAxis} 
                     domain={['auto', 'auto']}
                   />
-                  {/* 修正箇所 2: 引数の型を number | undefined にし、?? 0 で安全に処理 */}
                   <Tooltip 
-                    labelFormatter={(label) => label}
-                    formatter={(val: number | undefined) => [`${(val ?? 0).toLocaleString()}円`, '資産']}
+                    labelFormatter={(label, payload) => {
+                      // ツールチップには正確な日付(payload内のdate)を表示
+                      if (payload && payload[0] && payload[0].payload) {
+                        return format(parseISO(payload[0].payload.date), 'yyyy年M月d日');
+                      }
+                      return label;
+                    }}
+                    formatter={(val: number | undefined) => [`${(val ?? 0).toLocaleString()}円`, '収支']}
                     contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}}
                   />
                   <ReferenceLine y={0} stroke="#cbd5e1" strokeDasharray="3 3" />
                   <Line type="monotone" dataKey="amount" stroke="#10b981" strokeWidth={2} dot={false} />
                 </LineChart>
               </ResponsiveContainer>
+              {assetData.length === 0 && (
+                <div className="absolute inset-0 flex items-center justify-center text-slate-400 text-xs">
+                  データがありません
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -196,7 +301,6 @@ export const AnalysisView = ({ transactions, onSelectMachine, onSelectShop }: Pr
   );
 };
 
-// ランキングリスト用サブコンポーネント
 const RankingList = ({ data, type, onSelect }: { data: AggregatedData[], type: 'machine' | 'shop', onSelect: (name: string) => void }) => {
   if (data.length === 0) return <div className="text-center py-10 text-slate-400">データがありません</div>;
 
