@@ -3,15 +3,13 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Transaction } from '@/types';
-// ▼ 1. アイコンを追加 (Store, Gamepad2)
-import { Loader2, Trash2, ChevronRight, Store, Gamepad2 } from 'lucide-react';
+import { Loader2, Trash2, Store, Gamepad2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { MasterListSelector } from './MasterListSelector';
-// ▼ 2. 新しいボタンコンポーネントをインポート
 import { SelectionButton } from '@/components/SelectionButton';
 
 type Props = {
@@ -138,7 +136,6 @@ export const EntryForm = ({ isOpen, onClose, onSuccess, householdId, initialData
               <Input type="date" value={date} onChange={e => setDate(e.target.value)} required />
             </div>
 
-            {/* ▼ 3. レイアウト変更: grid-cols-2 を削除し、space-y-3 で縦並びに */}
             <div className="space-y-3">
               <SelectionButton
                 label="SHOP"
@@ -167,7 +164,9 @@ export const EntryForm = ({ isOpen, onClose, onSuccess, householdId, initialData
                   className="text-right font-mono text-lg" 
                   placeholder="0" 
                 />
-                <div className="flex gap-1 justify-end">
+                {/* ▼ +0.5kボタンを追加し、flex-wrapで折り返しに対応 */}
+                <div className="flex gap-1 justify-end flex-wrap">
+                  <Button type="button" variant="outline" size="sm" className="h-7 text-xs px-2" onClick={() => addAmount(investment, setInvestment, 500)}>+0.5k</Button>
                   <Button type="button" variant="outline" size="sm" className="h-7 text-xs px-2" onClick={() => addAmount(investment, setInvestment, 1000)}>+1k</Button>
                   <Button type="button" variant="outline" size="sm" className="h-7 text-xs px-2" onClick={() => addAmount(investment, setInvestment, 5000)}>+5k</Button>
                   <Button type="button" variant="outline" size="sm" className="h-7 text-xs px-2" onClick={() => addAmount(investment, setInvestment, 10000)}>+10k</Button>
@@ -184,7 +183,9 @@ export const EntryForm = ({ isOpen, onClose, onSuccess, householdId, initialData
                   className="text-right font-mono text-lg" 
                   placeholder="0" 
                 />
-                <div className="flex gap-1 justify-end">
+                {/* ▼ +0.5kボタンを追加し、flex-wrapで折り返しに対応 */}
+                <div className="flex gap-1 justify-end flex-wrap">
+                  <Button type="button" variant="outline" size="sm" className="h-7 text-xs px-2" onClick={() => addAmount(recovery, setRecovery, 500)}>+0.5k</Button>
                   <Button type="button" variant="outline" size="sm" className="h-7 text-xs px-2" onClick={() => addAmount(recovery, setRecovery, 1000)}>+1k</Button>
                   <Button type="button" variant="outline" size="sm" className="h-7 text-xs px-2" onClick={() => addAmount(recovery, setRecovery, 5000)}>+5k</Button>
                   <Button type="button" variant="outline" size="sm" className="h-7 text-xs px-2" onClick={() => addAmount(recovery, setRecovery, 10000)}>+10k</Button>
