@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo } from 'react';
-import Link from 'next/link'; // ★追加: これがないとエラーになります
+import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { Household, Transaction, HouseholdMember } from '@/types';
 import { TransactionItem } from '@/components/TransactionItem';
@@ -21,7 +21,7 @@ import {
   LogOut, Users, Wallet, Settings, Trash2,
   Calendar as CalendarIcon, NotebookPen, PieChart, History,
   ChevronLeft, ChevronRight, ArrowUpDown, Filter, Save, Lock, UserCircle, ArrowLeft, X,
-  DoorOpen, Mail // ★追加: メールアイコン
+  DoorOpen, Mail, UserX // ★追加: アカウント削除用アイコン
 } from 'lucide-react';
 import { format, addMonths, subMonths, startOfMonth, endOfMonth, isWithinInterval, parseISO, startOfYear, endOfYear } from 'date-fns';
 import { ja } from 'date-fns/locale';
@@ -42,7 +42,6 @@ export default function Home() {
   const [isLoginMode, setIsLoginMode] = useState(true);
   const [authLoading, setAuthLoading] = useState(false);
   
-  // ★追加: 確認メール送信済みフラグ
   const [isEmailSent, setIsEmailSent] = useState(false);
 
   const [profile, setProfile] = useState<any>(null);
@@ -138,12 +137,10 @@ export default function Home() {
     setAuthLoading(true);
     try {
       if (isLoginMode) {
-        // ログイン処理
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
         checkUser();
       } else {
-        // 新規登録処理
         const { error } = await supabase.auth.signUp({ 
           email, 
           password, 
@@ -153,8 +150,6 @@ export default function Home() {
           } 
         });
         if (error) throw error;
-        
-        // ★修正: アラートではなく完了画面へ
         setIsEmailSent(true);
       }
     } catch (err: any) { 
@@ -167,6 +162,35 @@ export default function Home() {
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setUser(null); setHouseholds([]); setTransactions([]); setMembers([]); setCurrentHousehold(null);
+  };
+
+  // ★追加: アカウント削除機能
+  const deleteAccount = async () => {
+    if (!user) return;
+    
+    if (!confirm("【重要】アカウントを削除しますか？\n\n・全ての収支データが完全に削除されます\n・あなたがオーナーのグループも削除されます\n・この操作は取り消せません")) return;
+    if (!confirm("最終確認です。本当によろしいですか？")) return;
+
+    try {
+      setLoading(true);
+      // SQLで作成した関数を呼び出し
+      const { error } = await supabase.rpc('delete_own_account');
+      
+      if (error) throw error;
+
+      await supabase.auth.signOut();
+      setUser(null);
+      setHouseholds([]);
+      setTransactions([]);
+      setIsSettingsOpen(false);
+      alert("アカウントを削除しました。ご利用ありがとうございました。");
+      
+    } catch (err: any) {
+      console.error(err);
+      alert("削除に失敗しました。時間をおいて再度お試しいただくか、お問い合わせください。");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const fetchHouseholds = async (userId: string) => {
@@ -240,35 +264,16 @@ export default function Home() {
 
   const leaveHousehold = async () => {
     if (!currentHousehold || !user) return;
-    
     if (currentHousehold.owner_id === user.id) {
-      alert("オーナーはグループを退出できません。退出するには、グループを削除するか、他のメンバーにオーナー権限を譲渡（未実装）する必要があります。");
-      return;
+      alert("オーナーはグループを退出できません。"); return;
     }
-
-    if (!confirm(`本当に「${currentHousehold.name}」から退出しますか？\n\n・あなたの記録データは削除されずに残ります。\n・退出後はこのグループが表示されなくなります。\n・招待リンクから再度参加すれば、元のデータにアクセスできます。`)) return;
-
+    if (!confirm(`本当に「${currentHousehold.name}」から退出しますか？`)) return;
     try {
       setLoading(true);
-      
-      const { error } = await supabase.rpc('leave_household', { 
-        target_household_id: currentHousehold.id 
-      });
-
+      const { error } = await supabase.rpc('leave_household', { target_household_id: currentHousehold.id });
       if (error) throw error;
-
-      alert("グループから退出しました。");
-      setIsSettingsOpen(false);
-      setCurrentHousehold(null);
-      
-      await fetchHouseholds(user.id);
-      
-    } catch (err) {
-      console.error(err);
-      alert('退出処理に失敗しました。');
-    } finally {
-      setLoading(false);
-    }
+      alert("グループから退出しました。"); setIsSettingsOpen(false); setCurrentHousehold(null); await fetchHouseholds(user.id);
+    } catch (err) { console.error(err); alert('退出処理に失敗しました。'); } finally { setLoading(false); }
   };
 
   const openNewForm = () => { setEditingTransaction(null); setIsFormOpen(true); };
@@ -331,18 +336,12 @@ export default function Home() {
   }, [displayedTransactions, filteredTransactions, viewMode, sortOrder]);
 
   const prevMonth = () => {
-    if (viewMode === 'list' && viewRange === 'year') {
-      setDisplayMonth(subMonths(displayMonth, 12));
-    } else {
-      setDisplayMonth(subMonths(displayMonth, 1));
-    }
+    if (viewMode === 'list' && viewRange === 'year') setDisplayMonth(subMonths(displayMonth, 12));
+    else setDisplayMonth(subMonths(displayMonth, 1));
   };
   const nextMonth = () => {
-    if (viewMode === 'list' && viewRange === 'year') {
-      setDisplayMonth(addMonths(displayMonth, 12));
-    } else {
-      setDisplayMonth(addMonths(displayMonth, 1));
-    }
+    if (viewMode === 'list' && viewRange === 'year') setDisplayMonth(addMonths(displayMonth, 12));
+    else setDisplayMonth(addMonths(displayMonth, 1));
   };
 
   const toggleMember = (userId: string) => {
@@ -352,27 +351,18 @@ export default function Home() {
 
   const clearFilter = () => {
     setFilterCondition({ type: null, value: '' });
-    if (viewRange === 'all') {
-      setViewRange('month'); 
-    }
+    if (viewRange === 'all') setViewRange('month'); 
   };
 
   const handleViewModeChange = (mode: any) => {
-    if (mode !== 'list' && filterCondition.type !== null) {
-      clearFilter();
-    }
-    
-    if (mode === 'calendar') {
-      setViewRange('month');
-    }
+    if (mode !== 'list' && filterCondition.type !== null) clearFilter();
+    if (mode === 'calendar') setViewRange('month');
     setViewMode(mode);
   };
 
-  // ★修正: 未ログイン時の表示 (LP + フォーム + 送信完了画面)
   if (!user) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 safe-area-padding">
-        {/* ヘッダー */}
         <header className="px-6 py-4 flex items-center justify-between max-w-5xl mx-auto w-full">
           <div className="flex items-center gap-2 font-bold text-xl text-slate-800">
             <Wallet className="w-6 h-6 text-blue-600" />
@@ -382,8 +372,6 @@ export default function Home() {
 
         <main className="max-w-5xl mx-auto px-4 py-8 lg:py-16 w-full">
           <div className="grid lg:grid-cols-2 gap-12 items-center">
-            
-            {/* 左側：アプリ紹介テキスト */}
             <div className="space-y-6 text-center lg:text-left">
               <h1 className="text-3xl lg:text-5xl font-extrabold text-slate-900 tracking-tight leading-tight">
                 パチンコ・パチスロ収支を<br className="hidden lg:block" />
@@ -394,7 +382,6 @@ export default function Home() {
                 友人やパートナーとの「グループ共有」機能で、収支を楽しく可視化しましょう。
               </p>
               
-              {/* 機能紹介アイコン */}
               <div className="grid grid-cols-3 gap-4 pt-4">
                 <div className="flex flex-col items-center gap-2 p-3 bg-white rounded-lg shadow-sm border border-slate-100">
                   <CalendarIcon className="w-6 h-6 text-blue-500" />
@@ -411,7 +398,6 @@ export default function Home() {
               </div>
             </div>
 
-            {/* 右側：ログイン/登録フォーム */}
             <div className="w-full max-w-md mx-auto">
               <Card className="shadow-2xl border-0 bg-white/80 backdrop-blur">
                 <CardHeader>
@@ -421,7 +407,6 @@ export default function Home() {
                 </CardHeader>
                 <CardContent>
                   {isEmailSent ? (
-                    /* ★送信完了画面 */
                     <div className="flex flex-col items-center justify-center space-y-6 py-8 text-center animate-in fade-in slide-in-from-bottom-2">
                       <div className="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center mb-2">
                         <Mail className="w-10 h-10 text-blue-600" />
@@ -437,16 +422,11 @@ export default function Home() {
                         <p>📩 メール内のリンクをクリックして登録を完了させてください。</p>
                         <p>⚠️ 届かない場合は「迷惑メールフォルダ」もご確認ください。</p>
                       </div>
-                      <Button 
-                        variant="outline" 
-                        className="w-full mt-2"
-                        onClick={() => { setIsEmailSent(false); setIsLoginMode(true); }}
-                      >
+                      <Button variant="outline" className="w-full mt-2" onClick={() => { setIsEmailSent(false); setIsLoginMode(true); }}>
                         ログイン画面へ戻る
                       </Button>
                     </div>
                   ) : (
-                    /* 既存のフォーム */
                     <form onSubmit={handleAuth} className="space-y-4">
                       {!isLoginMode && (
                         <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
@@ -468,7 +448,6 @@ export default function Home() {
                     </form>
                   )}
                   
-                  {/* 下部の切り替えリンク (メール送信済み画面では非表示) */}
                   {!isEmailSent && (
                     <div className="mt-6 text-center">
                       <button onClick={() => setIsLoginMode(!isLoginMode)} className="text-sm text-blue-600 hover:underline p-2 font-medium">
@@ -488,14 +467,12 @@ export default function Home() {
                 </p>
               )}
             </div>
-
           </div>
         </main>
       </div>
     );
   }
 
-  // ログイン後のメイン画面
   const getHeaderDateLabel = () => {
     if (viewRange === 'all') return '全期間';
     if (viewRange === 'year') return format(displayMonth, 'yyyy年', { locale: ja });
@@ -724,6 +701,7 @@ export default function Home() {
           </DialogHeader>
           
           <div className="space-y-6 py-4">
+            {/* アカウント設定エリア */}
             <div className="space-y-4 border p-4 rounded-lg bg-blue-50/50">
               <Label className="flex items-center gap-2 text-base text-blue-800">
                 <UserCircle className="w-5 h-5" /> アカウント設定
@@ -741,6 +719,7 @@ export default function Home() {
               </div>
             </div>
 
+            {/* グループ設定エリア */}
             <div className="space-y-4 border p-4 rounded-lg bg-slate-50">
                <Label className="flex items-center gap-2 text-base text-slate-800">
                 <Settings className="w-5 h-5" /> グループ設定
@@ -778,23 +757,36 @@ export default function Home() {
                   <Users className="w-3 h-3 mr-1" /> 招待リンクをコピー
                 </Button>
               </div>
+
+              {/* グループ削除・退出 */}
+              <div className="border-t pt-2 mt-2">
+                {isOwner ? (
+                  <Button variant="ghost" className="w-full justify-start h-10 text-red-600 hover:text-red-700 hover:bg-red-50" onClick={deleteHousehold}>
+                    <Trash2 className="w-4 h-4 mr-2" /> このグループを削除
+                  </Button>
+                ) : (
+                  <Button variant="ghost" className="w-full justify-start h-10 text-red-600 hover:text-red-700 hover:bg-red-50" onClick={leaveHousehold}>
+                    <DoorOpen className="w-4 h-4 mr-2" /> このグループを退出
+                  </Button>
+                )}
+              </div>
             </div>
 
-            <Button variant="outline" className="w-full justify-start h-12" onClick={handleLogout}>
-              <LogOut className="w-4 h-4 mr-2" /> ログアウト
-            </Button>
-            
-            <div className="border-t pt-4">
-              {isOwner ? (
-                <Button variant="destructive" className="w-full justify-start h-12" onClick={deleteHousehold}>
-                  <Trash2 className="w-4 h-4 mr-2" /> グループ削除
-                </Button>
-              ) : (
-                <Button variant="destructive" className="w-full justify-start h-12" onClick={leaveHousehold}>
-                  <DoorOpen className="w-4 h-4 mr-2" /> グループを退出
-                </Button>
-              )}
+            {/* 下部エリア: ログアウトとアカウント削除 */}
+            <div className="border-t pt-4 mt-4 space-y-6">
+               <Button variant="outline" className="w-full justify-start h-12" onClick={handleLogout}>
+                 <LogOut className="w-4 h-4 mr-2" /> ログアウト
+               </Button>
+               
+               {/* ★追加: アカウント削除ボタンエリア */}
+               <div className="bg-red-50 rounded-lg p-3 border border-red-100">
+                 <p className="text-xs text-red-500 font-bold mb-2">危険な操作（Danger Zone）</p>
+                 <Button variant="destructive" className="w-full justify-start h-10 bg-red-100 text-red-600 hover:bg-red-200 border-red-200 shadow-none" onClick={deleteAccount}>
+                   <UserX className="w-4 h-4 mr-2" /> アカウントを削除する
+                 </Button>
+               </div>
             </div>
+
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setIsSettingsOpen(false)}>閉じる</Button>
