@@ -1,150 +1,128 @@
-
 "use client";
 
 import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation'; // next/navigationを使用
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Loader2, Users, CheckCircle, AlertCircle, LogIn } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Loader2, Users } from 'lucide-react';
 
 export default function InvitePage() {
   const params = useParams();
   const router = useRouter();
-  const [loading, setLoading] = useState(true);
-  const [household, setHousehold] = useState<any>(null);
-  const [error, setError] = useState('');
-  const [user, setUser] = useState<any>(null);
-
+  // URLから招待トークンを取得
   const token = params.token as string;
 
+  const [householdName, setHouseholdName] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<any>(null);
+
   useEffect(() => {
-    // ★追加: アクセス時にトークンをブラウザに一時保存
+    // ★重要: ページを開いた時点で、このトークンをブラウザに保存しておく
     if (token) {
       localStorage.setItem('pendingInviteToken', token);
     }
-    checkUserAndInvite();
+
+    checkInviteAndUser();
   }, [token]);
 
-  const checkUserAndInvite = async () => {
-    // 1. ログインユーザー確認
-    const { data: { session } } = await supabase.auth.getSession();
-    setUser(session?.user || null);
-
-    // 2. トークンから家計簿情報を検索 (RPCを使用)
-    const { data, error } = await supabase
-      .rpc('get_household_by_token', { lookup_token: token });
-
-    if (error || !data || data.length === 0) {
-      console.error(error);
-      setError('招待リンクが無効か、有効期限切れです。');
-      // 無効な場合は保存したトークンも消しておく
-      localStorage.removeItem('pendingInviteToken');
-    } else {
-      setHousehold(data[0]);
-    }
-    setLoading(false);
-  };
-
-  const handleJoin = async () => {
-    if (!user) {
-      // 未ログインの場合、トップページへ誘導（トークンはlocalStorageにあるので安心）
-      router.push('/');
-      return;
-    }
-
+  const checkInviteAndUser = async () => {
     try {
-      setLoading(true);
-      const { error } = await supabase
-        .from('household_members')
-        .insert({
-          household_id: household.id,
-          user_id: user.id,
-          role: 'member'
-        });
-
-      if (error) {
-        if (error.code === '23505') {
-          alert('すでにこのグループに参加しています。');
-        } else {
-          throw error;
-        }
-      } else {
-        alert(`${household.name} に参加しました！`);
-        // 参加完了したのでトークンを削除
-        localStorage.removeItem('pendingInviteToken');
+      // 1. 招待トークンが有効かチェックしてグループ名を取得
+      const { data, error } = await supabase.rpc('get_household_by_token', { lookup_token: token });
+      
+      if (error || !data || data.length === 0) {
+        localStorage.removeItem('pendingInviteToken'); // 無効なら消す
+        alert('この招待リンクは無効か、期限切れです。');
+        router.push('/');
+        return;
       }
       
-      router.push('/');
+      setHouseholdName(data[0].name);
+
+      // 2. 現在ログインしているか確認
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        setUser(session.user);
+      }
     } catch (err) {
       console.error(err);
-      alert('参加に失敗しました。');
     } finally {
       setLoading(false);
     }
   };
 
+  const handleJoinOrRegister = async () => {
+    if (!user) {
+      // A. 未ログインの場合
+      // トークンはlocalStorageに保存済みなので、そのままトップページ（登録画面）へ送る
+      // → 登録完了後に page.tsx がトークンを検知して自動参加させる
+      router.push('/'); 
+    } else {
+      // B. ログイン済みの場合
+      // その場で参加処理を実行
+      try {
+        const { data: householdData } = await supabase.rpc('get_household_by_token', { lookup_token: token });
+        if (!householdData || householdData.length === 0) return;
+
+        const { error } = await supabase.from('household_members').insert({
+          household_id: householdData[0].id,
+          user_id: user.id,
+          role: 'member'
+        });
+
+        if (error && error.code !== '23505') { // 23505 = 既に参加済みエラーは無視
+           throw error;
+        }
+
+        localStorage.removeItem('pendingInviteToken'); // 参加完了したら消す
+        alert(`グループ「${householdName}」に参加しました！`);
+        router.push('/'); // メイン画面へ
+      } catch (err) {
+        alert('参加に失敗しました。');
+        console.error(err);
+      }
+    }
+  };
+
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50">
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
         <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4">
-      <Card className="w-full max-w-md shadow-xl text-center">
-        <CardHeader>
-          <div className="mx-auto bg-blue-100 p-3 rounded-full w-16 h-16 flex items-center justify-center mb-4">
-            <Users className="w-8 h-8 text-blue-600" />
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+      <Card className="w-full max-w-md shadow-xl border-0">
+        <CardHeader className="space-y-1">
+          <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-2">
+            <Users className="w-6 h-6 text-blue-600" />
           </div>
-          <CardTitle className="text-xl">グループ招待</CardTitle>
-          <CardDescription>以下のグループへの招待が届いています</CardDescription>
+          <CardTitle className="text-center text-xl">グループへの招待</CardTitle>
         </CardHeader>
-        
-        <CardContent className="space-y-6">
-          {error ? (
-            <div className="text-red-500 bg-red-50 p-4 rounded-lg flex items-center justify-center gap-2">
-              <AlertCircle className="w-5 h-5" />
-              <span>{error}</span>
+        <CardContent className="space-y-6 text-center">
+          <div>
+            <p className="text-slate-500 text-sm mb-2">以下のグループに招待されています</p>
+            <p className="text-2xl font-bold text-slate-800 py-2 border-y border-slate-100 bg-slate-50/50">
+              {householdName}
+            </p>
+          </div>
+          
+          <Button 
+            onClick={handleJoinOrRegister} 
+            className="w-full h-12 text-lg font-bold shadow-md shadow-blue-100"
+          >
+            {user ? 'このグループに参加する' : 'ログイン・登録して参加'}
+          </Button>
+          
+          {!user && (
+            <div className="text-xs text-slate-500 bg-slate-50 p-3 rounded text-left space-y-1">
+              <p>📌 <strong>手順:</strong></p>
+              <p>1. 上のボタンを押して、アカウントを作成（またはログイン）してください。</p>
+              <p>2. 登録が完了すると、自動的にこのグループに追加されます。</p>
             </div>
-          ) : (
-            <>
-              <div className="bg-slate-50 p-6 rounded-xl border border-slate-200">
-                <p className="text-sm text-slate-500 mb-1">グループ名</p>
-                <h2 className="text-2xl font-bold text-slate-800">{household?.name}</h2>
-              </div>
-
-              {!user ? (
-                <div className="space-y-4">
-                   <div className="text-sm text-amber-600 bg-amber-50 p-3 rounded-md">
-                    参加するにはログインまたは新規登録が必要です
-                  </div>
-                  {/* 未ログイン時のボタン */}
-                  <Button 
-                    onClick={() => router.push('/')} 
-                    className="w-full h-12 text-lg font-bold bg-blue-600 hover:bg-blue-700"
-                  >
-                    <LogIn className="w-4 h-4 mr-2" />
-                    ログイン / 新規登録へ
-                  </Button>
-                </div>
-              ) : (
-                <>
-                  <div className="flex items-center justify-center gap-2 text-sm text-green-600 bg-green-50 p-2 rounded-md">
-                    <CheckCircle className="w-4 h-4" />
-                    ログイン中: {user.email}
-                  </div>
-                  <Button 
-                    onClick={handleJoin} 
-                    className="w-full h-12 text-lg font-bold bg-blue-600 hover:bg-blue-700"
-                  >
-                    参加する
-                  </Button>
-                </>
-              )}
-            </>
           )}
         </CardContent>
       </Card>
