@@ -11,7 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { MasterListSelector } from './MasterListSelector';
 import { SelectionButton } from '@/components/SelectionButton';
-import { format } from 'date-fns'; // ▼ 追加: 日付フォーマット用
+import { format } from 'date-fns';
 
 type Props = {
   isOpen: boolean;
@@ -19,7 +19,7 @@ type Props = {
   onSuccess: () => void;
   householdId?: string;
   initialData?: Transaction | null;
-  defaultDate?: Date; // ▼ 追加: 新規作成時の初期日付
+  defaultDate?: Date;
 };
 
 export const EntryForm = ({ isOpen, onClose, onSuccess, householdId, initialData, defaultDate }: Props) => {
@@ -39,7 +39,6 @@ export const EntryForm = ({ isOpen, onClose, onSuccess, householdId, initialData
   useEffect(() => {
     if (isOpen) {
       if (initialData) {
-        // 編集モード
         setDate(initialData.date);
         setShopName(initialData.shop_name);
         setMachineName(initialData.machine_name);
@@ -47,8 +46,6 @@ export const EntryForm = ({ isOpen, onClose, onSuccess, householdId, initialData
         setRecovery(initialData.recovery.toString());
         setMemo(initialData.memo || '');
       } else {
-        // 新規作成モード
-        // ▼ 修正: defaultDateがあればそれを、なければ今日を設定
         const targetDate = defaultDate || new Date();
         setDate(format(targetDate, 'yyyy-MM-dd'));
         
@@ -59,7 +56,7 @@ export const EntryForm = ({ isOpen, onClose, onSuccess, householdId, initialData
         setMemo('');
       }
     }
-  }, [isOpen, initialData, householdId, defaultDate]); // defaultDateを依存配列に追加
+  }, [isOpen, initialData, householdId, defaultDate]);
 
   const addAmount = (currentValue: string, setter: (val: string) => void, amount: number) => {
     const current = parseInt(currentValue || '0', 10);
@@ -131,7 +128,11 @@ export const EntryForm = ({ isOpen, onClose, onSuccess, householdId, initialData
   return (
     <>
       <Dialog open={isOpen} onOpenChange={onClose}>
-        <DialogContent className="max-w-md w-[95%] rounded-xl max-h-[90vh] overflow-y-auto overflow-x-hidden">
+        <DialogContent 
+          className="max-w-md w-[95%] rounded-xl max-h-[90vh] overflow-y-auto overflow-x-hidden"
+          // ▼ 追加: 自動フォーカスを阻止してカレンダーがいきなり開くのを防ぐ
+          onOpenAutoFocus={(e) => e.preventDefault()}
+        >
           <DialogHeader>
             <DialogTitle>{initialData ? '記録の編集' : '新規記録'}</DialogTitle>
           </DialogHeader>
