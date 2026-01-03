@@ -88,6 +88,9 @@ export default function Home() {
   const [copyYear, setCopyYear] = useState<string>(new Date().getFullYear().toString());
   const [copyMonth, setCopyMonth] = useState<string>((new Date().getMonth() + 1).toString());
 
+  // ▼ 追加: カレンダー選択状態の管理
+  const [calendarSelectedDate, setCalendarSelectedDate] = useState<Date | null>(null);
+
   useEffect(() => { checkUser(); }, []);
   
   useEffect(() => { 
@@ -485,16 +488,22 @@ export default function Home() {
     } catch (err) { console.error(err); alert('退出処理に失敗しました。'); } finally { setLoading(false); }
   };
 
+  // ▼ 修正: カレンダーの選択日付を優先してフォームを開く
   const openNewForm = () => {
     setEditingTransaction(null);
-    // 現在表示中の月(displayMonth)に基づいて初期値を設定
-    // 今月表示中なら「今日」、過去/未来なら「その月の1日」
-    const today = new Date();
-    if (isSameMonth(today, displayMonth)) {
-      setNewEntryDate(today);
+    
+    // カレンダーで選択中ならその日付、そうでなければ今月なら今日、他月なら1日
+    if (calendarSelectedDate) {
+      setNewEntryDate(calendarSelectedDate);
     } else {
-      setNewEntryDate(startOfMonth(displayMonth));
+      const today = new Date();
+      if (isSameMonth(today, displayMonth)) {
+        setNewEntryDate(today);
+      } else {
+        setNewEntryDate(startOfMonth(displayMonth));
+      }
     }
+    
     setIsFormOpen(true);
   };
 
@@ -558,11 +567,17 @@ export default function Home() {
 
   const prevMonth = () => {
     if (viewMode === 'list' && viewRange === 'year') setDisplayMonth(subMonths(displayMonth, 12));
-    else setDisplayMonth(subMonths(displayMonth, 1));
+    else {
+      setDisplayMonth(subMonths(displayMonth, 1));
+      setCalendarSelectedDate(null); // 月変更時に選択解除
+    }
   };
   const nextMonth = () => {
     if (viewMode === 'list' && viewRange === 'year') setDisplayMonth(addMonths(displayMonth, 12));
-    else setDisplayMonth(addMonths(displayMonth, 1));
+    else {
+      setDisplayMonth(addMonths(displayMonth, 1));
+      setCalendarSelectedDate(null); // 月変更時に選択解除
+    }
   };
 
   const toggleMember = (userId: string) => {
@@ -591,14 +606,12 @@ export default function Home() {
   const onTouchEnd = () => {
     if (!touchStart.current || !touchEnd.current) return;
     const distance = touchStart.current - touchEnd.current;
-    const isLeftSwipe = distance > minSwipeDistance;
-    const isRightSwipe = distance < -minSwipeDistance;
-
-    if (isLeftSwipe) {
-      nextMonth();
-    }
-    if (isRightSwipe) {
-      prevMonth();
+    
+    // スワイプ判定 (横移動)
+    if (Math.abs(distance) > minSwipeDistance) {
+      if (distance > 0) nextMonth(); // 左スワイプで翌月
+      else prevMonth(); // 右スワイプで先月
+      setCalendarSelectedDate(null); // スワイプでも選択解除
     }
   };
 
@@ -817,7 +830,14 @@ export default function Home() {
                       {currentBalance >= 0 ? '+' : ''}{currentBalance.toLocaleString()}
                     </div>
                   </div>
-                  <CalendarView transactions={filteredTransactions} onSelectTransaction={openEditForm} currentDate={displayMonth} />
+                  {/* ▼ 変更: CalendarViewへ選択状態とその操作関数を渡す */}
+                  <CalendarView 
+                    transactions={filteredTransactions} 
+                    onSelectTransaction={openEditForm} 
+                    currentDate={displayMonth}
+                    selectedDate={calendarSelectedDate}
+                    onDateSelect={setCalendarSelectedDate}
+                  />
                 </div>
               </div>
             ) : viewMode === 'list' ? (

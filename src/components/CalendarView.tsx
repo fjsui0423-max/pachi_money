@@ -1,6 +1,8 @@
-import React, { useState, useMemo, useEffect } from 'react';
+"use client";
+
+import React, { useMemo } from 'react';
 import { Transaction } from '@/types';
-import { TransactionItem } from '@/components/TransactionItem'; // リスト表示用コンポーネントをインポート
+import { TransactionItem } from '@/components/TransactionItem';
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, isSameMonth, isSameDay, parseISO } from 'date-fns';
 import { ja } from 'date-fns/locale';
 
@@ -8,16 +10,13 @@ type Props = {
   transactions: Transaction[];
   onSelectTransaction: (t: Transaction) => void;
   currentDate: Date;
+  // ▼ 変更: 親から状態を受け取るように修正
+  selectedDate: Date | null;
+  onDateSelect: (date: Date | null) => void;
 };
 
-export const CalendarView = ({ transactions, onSelectTransaction, currentDate }: Props) => {
-  // 選択された日付を管理するステート
-  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
-
-  // 表示月が変わったら選択状態をリセット（または初期化）
-  useEffect(() => {
-    setSelectedDate(null);
-  }, [currentDate]);
+export const CalendarView = ({ transactions, onSelectTransaction, currentDate, selectedDate, onDateSelect }: Props) => {
+  // 内部での useState, useEffect は削除
 
   // カレンダーのグリッド生成
   const monthStart = startOfMonth(currentDate);
@@ -54,7 +53,7 @@ export const CalendarView = ({ transactions, onSelectTransaction, currentDate }:
 
       {/* 日付グリッド */}
       <div className="grid grid-cols-7 auto-rows-[minmax(60px,1fr)] border-b border-slate-100">
-        {calendarDays.map((day, dayIdx) => {
+        {calendarDays.map((day) => {
           const { transactions: dayTrans, total } = getDayData(day);
           const isCurrentMonth = isSameMonth(day, monthStart);
           const isPositive = total > 0;
@@ -69,13 +68,14 @@ export const CalendarView = ({ transactions, onSelectTransaction, currentDate }:
               className={`
                 relative border-b border-r border-slate-100 p-1 flex flex-col items-center justify-start transition-all
                 ${!isCurrentMonth ? 'bg-slate-50/50 text-slate-300' : 'bg-white text-slate-700'}
-                ${dayTrans.length > 0 ? 'cursor-pointer hover:bg-slate-50' : ''}
+                ${dayTrans.length > 0 || isCurrentMonth ? 'cursor-pointer hover:bg-slate-50' : ''}
                 ${isSelected ? 'bg-blue-50 ring-2 ring-inset ring-blue-400 z-10' : ''}
               `}
               onClick={() => {
                 // データがある日、または同月内の日なら選択可能にする
+                // クリックで親のハンドラを呼び出し
                 if (dayTrans.length > 0 || isCurrentMonth) {
-                  setSelectedDate(day);
+                  onDateSelect(day);
                 }
               }}
             >
