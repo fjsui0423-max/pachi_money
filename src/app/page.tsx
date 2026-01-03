@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo } from 'react';
-import Link from 'next/link';
+import Link from 'next/link'; // ★追加: これがないとエラーになります
 import { supabase } from '@/lib/supabase';
 import { Household, Transaction, HouseholdMember } from '@/types';
 import { TransactionItem } from '@/components/TransactionItem';
@@ -21,7 +21,7 @@ import {
   LogOut, Users, Wallet, Settings, Trash2,
   Calendar as CalendarIcon, NotebookPen, PieChart, History,
   ChevronLeft, ChevronRight, ArrowUpDown, Filter, Save, Lock, UserCircle, ArrowLeft, X,
-  DoorOpen // ★追加: 退出用アイコン
+  DoorOpen, Mail // ★追加: メールアイコン
 } from 'lucide-react';
 import { format, addMonths, subMonths, startOfMonth, endOfMonth, isWithinInterval, parseISO, startOfYear, endOfYear } from 'date-fns';
 import { ja } from 'date-fns/locale';
@@ -41,6 +41,9 @@ export default function Home() {
   const [username, setUsername] = useState('');
   const [isLoginMode, setIsLoginMode] = useState(true);
   const [authLoading, setAuthLoading] = useState(false);
+  
+  // ★追加: 確認メール送信済みフラグ
+  const [isEmailSent, setIsEmailSent] = useState(false);
 
   const [profile, setProfile] = useState<any>(null);
   const [editUsername, setEditUsername] = useState('');
@@ -135,15 +138,30 @@ export default function Home() {
     setAuthLoading(true);
     try {
       if (isLoginMode) {
+        // ログイン処理
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
+        checkUser();
       } else {
-        const { error } = await supabase.auth.signUp({ email, password, options: { data: { username: username || '名無し' } } });
+        // 新規登録処理
+        const { error } = await supabase.auth.signUp({ 
+          email, 
+          password, 
+          options: { 
+            emailRedirectTo: `${window.location.origin}/`,
+            data: { username: username || '名無し' } 
+          } 
+        });
         if (error) throw error;
-        alert('登録完了！ログインします。');
+        
+        // ★修正: アラートではなく完了画面へ
+        setIsEmailSent(true);
       }
-      checkUser();
-    } catch (err: any) { alert(err.message); } finally { setAuthLoading(false); }
+    } catch (err: any) { 
+      alert(err.message); 
+    } finally { 
+      setAuthLoading(false); 
+    }
   };
 
   const handleLogout = async () => {
@@ -220,11 +238,9 @@ export default function Home() {
     } catch (err) { alert('削除失敗'); } finally { setLoading(false); }
   };
 
-  // ★追加: グループ退出機能 (RPC関数呼び出し版)
   const leaveHousehold = async () => {
     if (!currentHousehold || !user) return;
     
-    // オーナーチェック
     if (currentHousehold.owner_id === user.id) {
       alert("オーナーはグループを退出できません。退出するには、グループを削除するか、他のメンバーにオーナー権限を譲渡（未実装）する必要があります。");
       return;
@@ -235,7 +251,6 @@ export default function Home() {
     try {
       setLoading(true);
       
-      // SQL側で作成した leave_household 関数を呼び出す
       const { error } = await supabase.rpc('leave_household', { 
         target_household_id: currentHousehold.id 
       });
@@ -244,9 +259,8 @@ export default function Home() {
 
       alert("グループから退出しました。");
       setIsSettingsOpen(false);
-      setCurrentHousehold(null); // 現在の選択をクリア
+      setCurrentHousehold(null);
       
-      // グループリストを再取得（退出したグループがリストから消えます）
       await fetchHouseholds(user.id);
       
     } catch (err) {
@@ -354,6 +368,7 @@ export default function Home() {
     setViewMode(mode);
   };
 
+  // ★修正: 未ログイン時の表示 (LP + フォーム + 送信完了画面)
   if (!user) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 safe-area-padding">
@@ -368,7 +383,7 @@ export default function Home() {
         <main className="max-w-5xl mx-auto px-4 py-8 lg:py-16 w-full">
           <div className="grid lg:grid-cols-2 gap-12 items-center">
             
-            {/* 左側（スマホでは上）：アプリ紹介テキスト */}
+            {/* 左側：アプリ紹介テキスト */}
             <div className="space-y-6 text-center lg:text-left">
               <h1 className="text-3xl lg:text-5xl font-extrabold text-slate-900 tracking-tight leading-tight">
                 パチンコ・パチスロ収支を<br className="hidden lg:block" />
@@ -396,48 +411,82 @@ export default function Home() {
               </div>
             </div>
 
-            {/* 右側（スマホでは下）：ログインフォーム */}
+            {/* 右側：ログイン/登録フォーム */}
             <div className="w-full max-w-md mx-auto">
               <Card className="shadow-2xl border-0 bg-white/80 backdrop-blur">
                 <CardHeader>
                   <CardTitle className="text-center text-xl font-bold text-slate-800">
-                    {isLoginMode ? 'ログインして始める' : 'アカウント作成'}
+                    {isEmailSent ? 'メール送信完了' : (isLoginMode ? 'ログインして始める' : 'アカウント作成')}
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <form onSubmit={handleAuth} className="space-y-4">
-                    {!isLoginMode && (
-                      <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
-                        <label className="text-sm font-medium">お名前 (ニックネーム)</label>
-                        <Input type="text" required placeholder="例: スロ吉" value={username} onChange={e => setUsername(e.target.value)} className="h-11" />
+                  {isEmailSent ? (
+                    /* ★送信完了画面 */
+                    <div className="flex flex-col items-center justify-center space-y-6 py-8 text-center animate-in fade-in slide-in-from-bottom-2">
+                      <div className="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center mb-2">
+                        <Mail className="w-10 h-10 text-blue-600" />
                       </div>
-                    )}
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">メールアドレス</label>
-                      <Input type="email" required value={email} onChange={e => setEmail(e.target.value)} className="h-11" />
+                      <div className="space-y-2">
+                        <h3 className="text-xl font-bold text-slate-800">確認メールを送信しました</h3>
+                        <p className="text-sm text-slate-600 leading-relaxed">
+                          <span className="font-bold text-slate-800">{email}</span> 宛に<br />
+                          確認用のメールをお送りしました。
+                        </p>
+                      </div>
+                      <div className="bg-slate-50 p-4 rounded-lg text-xs text-slate-500 text-left w-full space-y-2 border border-slate-100">
+                        <p>📩 メール内のリンクをクリックして登録を完了させてください。</p>
+                        <p>⚠️ 届かない場合は「迷惑メールフォルダ」もご確認ください。</p>
+                      </div>
+                      <Button 
+                        variant="outline" 
+                        className="w-full mt-2"
+                        onClick={() => { setIsEmailSent(false); setIsLoginMode(true); }}
+                      >
+                        ログイン画面へ戻る
+                      </Button>
                     </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">パスワード</label>
-                      <Input type="password" required value={password} onChange={e => setPassword(e.target.value)} className="h-11" />
+                  ) : (
+                    /* 既存のフォーム */
+                    <form onSubmit={handleAuth} className="space-y-4">
+                      {!isLoginMode && (
+                        <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
+                          <label className="text-sm font-medium">お名前 (ニックネーム)</label>
+                          <Input type="text" required placeholder="例: スロ吉" value={username} onChange={e => setUsername(e.target.value)} className="h-11" />
+                        </div>
+                      )}
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">メールアドレス</label>
+                        <Input type="email" required value={email} onChange={e => setEmail(e.target.value)} className="h-11" />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">パスワード</label>
+                        <Input type="password" required value={password} onChange={e => setPassword(e.target.value)} className="h-11" />
+                      </div>
+                      <Button type="submit" className="w-full h-11 text-lg font-bold shadow-lg shadow-blue-200" disabled={authLoading}>
+                        {authLoading ? '処理中...' : (isLoginMode ? 'ログイン' : '無料で登録')}
+                      </Button>
+                    </form>
+                  )}
+                  
+                  {/* 下部の切り替えリンク (メール送信済み画面では非表示) */}
+                  {!isEmailSent && (
+                    <div className="mt-6 text-center">
+                      <button onClick={() => setIsLoginMode(!isLoginMode)} className="text-sm text-blue-600 hover:underline p-2 font-medium">
+                        {isLoginMode ? 'はじめての方はこちら（新規登録）' : 'すでにアカウントをお持ちの方'}
+                      </button>
                     </div>
-                    <Button type="submit" className="w-full h-11 text-lg font-bold shadow-lg shadow-blue-200" disabled={authLoading}>
-                      {authLoading ? '処理中...' : (isLoginMode ? 'ログイン' : '無料で登録')}
-                    </Button>
-                  </form>
-                  <div className="mt-6 text-center">
-                    <button onClick={() => setIsLoginMode(!isLoginMode)} className="text-sm text-blue-600 hover:underline p-2 font-medium">
-                      {isLoginMode ? 'はじめての方はこちら（新規登録）' : 'すでにアカウントをお持ちの方'}
-                    </button>
-                  </div>
+                  )}
                 </CardContent>
               </Card>
-              <p className="text-center text-xs text-slate-400 mt-4">
-                登録することで、
-                <Link href="/terms" className="underline hover:text-slate-600">利用規約</Link>
-                と
-                <Link href="/privacy" className="underline hover:text-slate-600">プライバシーポリシー</Link>
-                に同意したものとみなされます。
-              </p>
+              {!isEmailSent && (
+                <p className="text-center text-xs text-slate-400 mt-4">
+                  登録することで、
+                  <Link href="/terms" className="underline hover:text-slate-600">利用規約</Link>
+                  と
+                  <Link href="/privacy" className="underline hover:text-slate-600">プライバシーポリシー</Link>
+                  に同意したものとみなされます。
+                </p>
+              )}
             </div>
 
           </div>
@@ -445,6 +494,8 @@ export default function Home() {
       </div>
     );
   }
+
+  // ログイン後のメイン画面
   const getHeaderDateLabel = () => {
     if (viewRange === 'all') return '全期間';
     if (viewRange === 'year') return format(displayMonth, 'yyyy年', { locale: ja });
@@ -490,7 +541,6 @@ export default function Home() {
       <main className="max-w-md mx-auto p-4 space-y-4">
         {households.length === 0 && (
           <div className="text-center py-20 px-4">
-             {/* ... (グループなし画面) ... */}
             <Wallet className="w-16 h-16 text-slate-300 mx-auto mb-4" />
             <p className="mb-6 text-slate-500 font-bold">まだ家計簿がありません</p>
             <Button onClick={createHousehold} className="w-full h-12 text-lg">最初のグループを作る</Button>
@@ -539,7 +589,6 @@ export default function Home() {
                         <ChevronRight className="w-4 h-4" />
                        </Button>
                     </div>
-                    {/* カレンダーモード用の集計（フィルタに関わらず月単位） */}
                     <div className={`text-xl font-mono font-bold tracking-tight ${currentBalance >= 0 ? 'text-blue-600' : 'text-red-500'}`}>
                       {currentBalance >= 0 ? '+' : ''}{currentBalance.toLocaleString()}
                     </div>
@@ -559,7 +608,6 @@ export default function Home() {
                     </span>
                   </div>
 
-                  {/* ★追加: フィルタリング中の表示 */}
                   {filterCondition.type && (
                     <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-lg p-2 text-xs">
                       <div className="flex items-center gap-2">
@@ -609,12 +657,12 @@ export default function Home() {
                 transactions={filteredTransactions} 
                 onSelectMachine={(name) => {
                   setFilterCondition({ type: 'machine', value: name });
-                  setViewRange('all'); // 全期間モードに切り替え
+                  setViewRange('all');
                   setViewMode('list');
                 }}
                 onSelectShop={(name) => {
                   setFilterCondition({ type: 'shop', value: name });
-                  setViewRange('all'); // 全期間モードに切り替え
+                  setViewRange('all');
                   setViewMode('list');
                 }}
               />
@@ -737,7 +785,6 @@ export default function Home() {
             </Button>
             
             <div className="border-t pt-4">
-              {/* ★変更: オーナーかどうかでボタンを出し分け */}
               {isOwner ? (
                 <Button variant="destructive" className="w-full justify-start h-12" onClick={deleteHousehold}>
                   <Trash2 className="w-4 h-4 mr-2" /> グループ削除
