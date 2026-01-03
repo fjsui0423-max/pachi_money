@@ -18,13 +18,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-// ▼ 追加: Select関連コンポーネント
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'; 
 import { 
   LogOut, Users, Wallet, Settings, Trash2,
   Calendar as CalendarIcon, NotebookPen, PieChart, History,
   ChevronLeft, ChevronRight, ArrowUpDown, Filter, Save, Lock, UserCircle, ArrowLeft, X,
-  DoorOpen, Mail, UserX, FileUp, Copy
+  DoorOpen, Mail, UserX, FileUp, Copy, Star // ▼ 追加: Starアイコン
 } from 'lucide-react';
 import { format, addMonths, subMonths, startOfMonth, endOfMonth, isWithinInterval, parseISO, startOfYear, endOfYear, getYear } from 'date-fns';
 import { ja } from 'date-fns/locale';
@@ -36,6 +35,9 @@ const AnalysisView = dynamic(
     loading: () => <div className="text-center py-20 text-slate-400">グラフ読み込み中...</div>
   }
 );
+
+// Household型を拡張して is_default を持てるようにする
+type ExtendedHousehold = Household & { is_default?: boolean };
 
 export default function Home() {
   const [user, setUser] = useState<any>(null);
@@ -51,8 +53,10 @@ export default function Home() {
   const [editUsername, setEditUsername] = useState('');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
-  const [households, setHouseholds] = useState<Household[]>([]);
-  const [currentHousehold, setCurrentHousehold] = useState<Household | null>(null);
+  // ▼ 型を変更
+  const [households, setHouseholds] = useState<ExtendedHousehold[]>([]);
+  const [currentHousehold, setCurrentHousehold] = useState<ExtendedHousehold | null>(null);
+  
   const [members, setMembers] = useState<HouseholdMember[]>([]);
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -79,7 +83,6 @@ export default function Home() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // ▼ データコピー用ステート
   const [copyTargetHouseholdId, setCopyTargetHouseholdId] = useState<string>('');
   const [copyRange, setCopyRange] = useState<'all' | 'year' | 'month'>('all');
   const [copyYear, setCopyYear] = useState<string>(new Date().getFullYear().toString());
@@ -103,7 +106,6 @@ export default function Home() {
     }
   }, [user]);
 
-  // ▼ コピー用の「年」リスト生成 (現在のトランザクションから抽出)
   const availableYearsForCopy = useMemo(() => {
     const years = new Set(transactions.map(t => getYear(parseISO(t.date))));
     years.add(new Date().getFullYear());
@@ -236,7 +238,6 @@ export default function Home() {
               let amount = parseInt(String(row['収支'] || '0').replace(/,/g, ''), 10);
               
               if (amount === 0 && (investment !== 0 || recovery !== 0)) {
-                 // 必要なら計算
               }
 
               insertData.push({
@@ -287,14 +288,12 @@ export default function Home() {
     });
   };
 
-  // ▼ データコピー処理（期間指定対応）
   const handleCopyData = async () => {
     if (!currentHousehold || !user || !copyTargetHouseholdId) return;
     
     const targetHousehold = households.find(h => h.id === copyTargetHouseholdId);
     if (!targetHousehold) return;
 
-    // 確認メッセージの作成
     let rangeMsg = "全期間";
     if (copyRange === 'year') rangeMsg = `${copyYear}年の`;
     if (copyRange === 'month') rangeMsg = `${copyYear}年${copyMonth}月の`;
@@ -303,19 +302,16 @@ export default function Home() {
 
     setLoading(true);
     try {
-      // 1. クエリの構築（期間フィルタ）
       let query = supabase
         .from('transactions')
         .select('*')
         .eq('household_id', currentHousehold.id);
 
       if (copyRange === 'year') {
-        // 年単位: その年の1/1〜12/31
         const startDate = `${copyYear}-01-01`;
         const endDate = `${copyYear}-12-31`;
         query = query.gte('date', startDate).lte('date', endDate);
       } else if (copyRange === 'month') {
-        // 月単位: その月の初日〜末日
         const targetDate = new Date(parseInt(copyYear), parseInt(copyMonth) - 1, 1);
         const startDate = format(startOfMonth(targetDate), 'yyyy-MM-dd');
         const endDate = format(endOfMonth(targetDate), 'yyyy-MM-dd');
@@ -330,9 +326,8 @@ export default function Home() {
         return;
       }
 
-      // 2. コピー用データを作成
       const insertData = sourceTransactions.map(t => ({
-        household_id: targetHousehold.id, // コピー先ID
+        household_id: targetHousehold.id,
         user_id: user.id,
         date: t.date,
         shop_name: t.shop_name,
@@ -345,7 +340,6 @@ export default function Home() {
         created_at: new Date().toISOString()
       }));
 
-      // 3. 一括挿入
       const { error: insertError } = await supabase
         .from('transactions')
         .insert(insertData);
@@ -364,13 +358,62 @@ export default function Home() {
     }
   };
 
+  // ▼ 追加: メイングループ設定処理
+  const handleSetDefault = async () => {
+    if (!currentHousehold || !user) return;
+    
+    setLoading(true);
+    try {
+      // RPCを呼び出して、他をfalse、これをtrueにする
+      const { error } = await supabase.rpc('set_default_household', { 
+        target_household_id: currentHousehold.id 
+      });
+
+      if (error) throw error;
+
+      alert(`「${currentHousehold.name}」をメインのグループに設定しました。\n次回ログイン時から最初に表示されます。`);
+      
+      // グループリストを再取得して並び順を更新
+      await fetchHouseholds(user.id);
+      
+    } catch (err: any) {
+      console.error(err);
+      alert(`設定に失敗しました: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ▼ 修正: is_defaultを取得し、並び替えを行う
   const fetchHouseholds = async (userId: string) => {
-    const { data: members } = await supabase.from('household_members').select('household_id, households(id, name, invite_token, owner_id, is_edit_restricted)').eq('user_id', userId);
+    const { data: members } = await supabase
+      .from('household_members')
+      .select('household_id, is_default, households(id, name, invite_token, owner_id, is_edit_restricted)')
+      .eq('user_id', userId);
+
     if (members && members.length > 0) {
-      const list = members.map((m: any) => m.households) as Household[];
+      // メイン(is_default=true)が先頭に来るようにソート
+      members.sort((a, b) => (b.is_default === true ? 1 : 0) - (a.is_default === true ? 1 : 0));
+
+      const list = members.map((m: any) => ({
+        ...m.households,
+        is_default: m.is_default // 拡張プロパティとして持たせる
+      })) as ExtendedHousehold[];
+
       setHouseholds(list);
-      setCurrentHousehold(prev => prev ? list.find(h => h.id === prev.id) || list[0] : list[0]);
-    } else { setHouseholds([]); setCurrentHousehold(null); }
+      
+      // 初期表示の選択
+      setCurrentHousehold(prev => {
+        // すでに選択中ならそれを維持、なければリスト先頭（＝メイン）を選択
+        if (prev) {
+          return list.find(h => h.id === prev.id) || list[0];
+        }
+        return list[0];
+      });
+    } else { 
+      setHouseholds([]); 
+      setCurrentHousehold(null); 
+    }
   };
 
   const fetchTransactions = async () => {
@@ -397,7 +440,7 @@ export default function Home() {
     try {
       const { data: newHousehold, error: hError } = await supabase.from('households').insert({ name, owner_id: user.id, is_edit_restricted: false }).select().single(); 
       if (hError) throw hError;
-      await supabase.from('household_members').insert({ household_id: newHousehold.id, user_id: user.id });
+      await supabase.from('household_members').insert({ household_id: newHousehold.id, user_id: user.id, is_default: true }); // 作成時はデフォルトにする
       await fetchHouseholds(user.id);
     } catch (err) { alert("作成失敗"); }
   };
@@ -929,8 +972,31 @@ export default function Home() {
                   <p className="text-xs text-red-500">※ オーナーにより編集が制限されています</p>
                 )}
               </div>
+              
+              {/* ▼ メイングループ設定ボタン */}
+              {currentHousehold && (
+                <div className="pt-2">
+                  {currentHousehold.is_default ? (
+                    <div className="flex items-center justify-center gap-2 text-xs text-orange-500 font-bold bg-orange-50 p-2 rounded">
+                      <Star className="w-4 h-4 fill-orange-500" /> 現在メインのグループです
+                    </div>
+                  ) : (
+                    <Button 
+                      variant="outline" 
+                      className="w-full text-slate-600 hover:text-orange-600 hover:bg-orange-50 border-dashed"
+                      onClick={handleSetDefault}
+                    >
+                      <Star className="w-4 h-4 mr-2" /> このグループをメインにする
+                    </Button>
+                  )}
+                  <p className="text-[10px] text-slate-400 mt-1 text-center">
+                    ログイン時に最初に表示されます
+                  </p>
+                </div>
+              )}
+
               {isOwner && (
-                <div className="flex items-center justify-between border-t pt-4">
+                <div className="flex items-center justify-between border-t pt-4 mt-2">
                   <div className="space-y-0.5">
                     <Label className="text-sm flex items-center gap-2">
                       <Lock className="w-4 h-4" /> 編集制限
@@ -972,14 +1038,13 @@ export default function Home() {
                 </p>
               </div>
 
-              {/* ▼ データコピー機能 */}
+              {/* データコピー機能 */}
               <div className="border-t pt-4 mt-4">
                 <Label className="flex items-center gap-2 mb-2 text-slate-700">
                   <Copy className="w-4 h-4" /> データを別のグループへコピー
                 </Label>
                 <div className="space-y-3">
                   
-                  {/* コピー先・範囲の選択 */}
                   <div className="grid grid-cols-2 gap-2">
                      <Select 
                        value={copyTargetHouseholdId}
@@ -1013,7 +1078,6 @@ export default function Home() {
                      </Select>
                   </div>
 
-                  {/* 年・月の選択 (範囲がall以外の場合に表示) */}
                   {copyRange !== 'all' && (
                     <div className="flex gap-2">
                        <Select value={copyYear} onValueChange={setCopyYear}>
