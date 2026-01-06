@@ -5,8 +5,9 @@ export default function robots(): MetadataRoute.Robots {
     rules: {
       userAgent: '*',
       allow: '/',
-      disallow: ['/invite/', '/private/'], // クロール不要なパス
+      disallow: ['/invite/', '/private/'],
     },
-    sitemap: 'pachimoney.vercel.app',
+    // ▼ 修正: https:// を追加して完全なURLにする
+    sitemap: 'https://pachimoney.vercel.app/sitemap.xml',
   };
 }
