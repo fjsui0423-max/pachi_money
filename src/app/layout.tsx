@@ -3,8 +3,9 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import Script from "next/script";
 import { Footer } from "@/components/Footer";
+import { Analytics } from "@vercel/analytics/next"
+import { SpeedInsights } from "@vercel/speed-insights/next"
 
-// この行が抜けておりました
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
