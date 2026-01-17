@@ -88,7 +88,7 @@ export default function Home() {
   const [copyYear, setCopyYear] = useState<string>(new Date().getFullYear().toString());
   const [copyMonth, setCopyMonth] = useState<string>((new Date().getMonth() + 1).toString());
 
-  // ▼ 追加: カレンダー選択状態の管理
+  // カレンダー選択状態の管理
   const [calendarSelectedDate, setCalendarSelectedDate] = useState<Date | null>(null);
 
   useEffect(() => { checkUser(); }, []);
@@ -210,11 +210,12 @@ export default function Home() {
     }
   };
 
+  // ▼ CSVインポート処理（重複チェック追加版）
   const handleImportCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !currentHousehold || !user) return;
 
-    if (!confirm("CSVデータをインポートしますか？\n※ 「日付,店舗,機種,投資額,回収額,収支,メモ」の形式に対応しています。\n※ 現在のグループに追加されます。")) {
+    if (!confirm("CSVデータをインポートしますか？\n※ 日付・店舗・機種・金額・メモが完全に一致するデータはスキップされます。\n※ 「日付,店舗,機種,投資額,回収額,収支,メモ」の形式に対応しています。")) {
       e.target.value = '';
       return;
     }
@@ -227,9 +228,9 @@ export default function Home() {
       complete: async (results) => {
         try {
           const rows = results.data as any[];
-          const insertData: any[] = [];
-          let errorCount = 0;
-
+          const candidates: any[] = [];
+          
+          // 1. まずCSVデータを解析して候補リストを作成
           for (const row of rows) {
             if (!row['日付']) {
               continue;
@@ -242,9 +243,10 @@ export default function Home() {
               let amount = parseInt(String(row['収支'] || '0').replace(/,/g, ''), 10);
               
               if (amount === 0 && (investment !== 0 || recovery !== 0)) {
+                 // 必要ならここで計算しても良いが、CSVの値を優先
               }
 
-              insertData.push({
+              candidates.push({
                 household_id: currentHousehold.id,
                 user_id: user.id,
                 date: formattedDate,
@@ -260,19 +262,52 @@ export default function Home() {
 
             } catch (rowErr) {
               console.error("行のパースエラー:", row, rowErr);
-              errorCount++;
             }
           }
 
-          if (insertData.length === 0) {
+          if (candidates.length === 0) {
             alert("インポートできるデータが見つかりませんでした。\nCSVのヘッダーが「日付,店舗,機種...」となっているか確認してください。");
             return;
           }
 
+          // 2. 既存データを取得して重複チェック
+          // CSV内の最小日付と最大日付を取得して、検索範囲を絞る
+          const dates = candidates.map(c => c.date).sort();
+          const minDate = dates[0];
+          const maxDate = dates[dates.length - 1];
+
+          const { data: existingData, error: fetchError } = await supabase
+            .from('transactions')
+            .select('date, shop_name, machine_name, investment, recovery, memo')
+            .eq('household_id', currentHousehold.id)
+            .gte('date', minDate)
+            .lte('date', maxDate);
+
+          if (fetchError) throw fetchError;
+
+          // 既存データの署名セットを作成 (日付|店舗|機種|投資|回収|メモ)
+          const existingSignatures = new Set(existingData?.map(t => 
+            `${t.date}|${t.shop_name}|${t.machine_name}|${t.investment}|${t.recovery}|${t.memo}`
+          ));
+
+          // 重複していないデータのみを抽出
+          const insertData = candidates.filter(c => {
+            const signature = `${c.date}|${c.shop_name}|${c.machine_name}|${c.investment}|${c.recovery}|${c.memo}`;
+            return !existingSignatures.has(signature);
+          });
+
+          if (insertData.length === 0) {
+            alert("すべてのデータが既に登録済みのため、インポートをスキップしました。");
+            return;
+          }
+
+          // 3. 挿入実行
           const { error } = await supabase.from('transactions').insert(insertData);
           if (error) throw error;
 
-          alert(`${insertData.length} 件のデータをインポートしました！`);
+          const skippedCount = candidates.length - insertData.length;
+          alert(`${insertData.length} 件のデータをインポートしました！\n(${skippedCount} 件の重複データはスキップされました)`);
+          
           setIsSettingsOpen(false);
           fetchTransactions();
 
@@ -488,20 +523,14 @@ export default function Home() {
     } catch (err) { console.error(err); alert('退出処理に失敗しました。'); } finally { setLoading(false); }
   };
 
-  // ▼ 修正: カレンダーの選択日付を優先してフォームを開く
   const openNewForm = () => {
     setEditingTransaction(null);
     
-    // カレンダーで選択中ならその日付、そうでなければ今月なら今日、他月なら1日
     if (calendarSelectedDate) {
       setNewEntryDate(calendarSelectedDate);
     } else {
-      const today = new Date();
-      if (isSameMonth(today, displayMonth)) {
-        setNewEntryDate(today);
-      } else {
-        setNewEntryDate(startOfMonth(displayMonth));
-      }
+      // 選択がなければ今日
+      setNewEntryDate(new Date());
     }
     
     setIsFormOpen(true);
@@ -607,11 +636,10 @@ export default function Home() {
     if (!touchStart.current || !touchEnd.current) return;
     const distance = touchStart.current - touchEnd.current;
     
-    // スワイプ判定 (横移動)
     if (Math.abs(distance) > minSwipeDistance) {
-      if (distance > 0) nextMonth(); // 左スワイプで翌月
-      else prevMonth(); // 右スワイプで先月
-      setCalendarSelectedDate(null); // スワイプでも選択解除
+      if (distance > 0) nextMonth(); 
+      else prevMonth(); 
+      setCalendarSelectedDate(null); 
     }
   };
 
@@ -830,7 +858,6 @@ export default function Home() {
                       {currentBalance >= 0 ? '+' : ''}{currentBalance.toLocaleString()}
                     </div>
                   </div>
-                  {/* ▼ 変更: CalendarViewへ選択状態とその操作関数を渡す */}
                   <CalendarView 
                     transactions={filteredTransactions} 
                     onSelectTransaction={openEditForm} 
